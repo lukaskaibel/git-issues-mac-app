@@ -1,0 +1,717 @@
+import Foundation
+import GRDB
+
+/// Keeps the local database and GitHub in step: pulls what changed, sends queued changes, and reconciles
+/// the two when both sides moved. Pulls and pushes never overlap, so a stale read cannot undo a fresh write.
+public actor SyncEngine {
+    private let db: AppDatabase
+    private let api: GitHubAPI
+    public nonisolated let status: SyncStatus
+
+    private var activeProjectId: String?
+    private var watchedIssueId: String?
+    private var pollInterval: TimeInterval = 15
+
+    private var lastPull: [String: Date] = [:]
+    private var lastDetailPull: Date?
+    private var lastProjectListPull: Date?
+    private var forceSweep: Set<String> = []
+    /// Items GitHub lists but will not show us (no access); remembered so they are not re-requested forever.
+    private var unhydratable: [String: String] = [:]
+    private var wasOffline = true
+
+    private var loop: Task<Void, Never>?
+    private var sleeper: Task<Void, Never>?
+    private var kicked = false
+
+    public init(db: AppDatabase, api: GitHubAPI, status: SyncStatus) {
+        self.db = db
+        self.api = api
+        self.status = status
+    }
+
+    // MARK: Control
+
+    public func start() {
+        guard loop == nil else { return }
+        loop = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.cycle()
+                await self.idle()
+            }
+        }
+    }
+
+    public func stop() {
+        loop?.cancel()
+        loop = nil
+        sleeper?.cancel()
+    }
+
+    /// Asks for a sync cycle now instead of at the next poll.
+    public func kick() {
+        kicked = true
+        sleeper?.cancel()
+    }
+
+    public func setActiveProject(_ id: String?) {
+        guard activeProjectId != id else { return }
+        activeProjectId = id
+        kick()
+    }
+
+    public func setWatchedIssue(_ contentId: String?) {
+        guard watchedIssueId != contentId else { return }
+        watchedIssueId = contentId
+        lastDetailPull = nil
+        if contentId != nil { kick() }
+    }
+
+    public func setPollInterval(_ seconds: TimeInterval) {
+        pollInterval = seconds
+    }
+
+    public func forceRefresh() {
+        if let activeProjectId { forceSweep.insert(activeProjectId) }
+        lastPull = [:]
+        lastProjectListPull = nil
+        kick()
+    }
+
+    /// Sends everything that is queued, without waiting for the next cycle.
+    public func pushPending() async throws {
+        try await push()
+    }
+
+    /// Re-reads a project from GitHub even if nothing appears to have changed.
+    public func forcePull(projectId: String) async throws {
+        forceSweep.insert(projectId)
+        try await pull(projectId: projectId)
+    }
+
+    private func idle() async {
+        if kicked {
+            kicked = false
+            return
+        }
+        let seconds = wasOffline ? min(pollInterval, 10) : pollInterval
+        let task = Task<Void, Never> { _ = try? await Task.sleep(for: .seconds(seconds)) }
+        sleeper = task
+        await task.value
+        sleeper = nil
+        kicked = false
+    }
+
+    // MARK: Cycle
+
+    private func cycle() async {
+        do {
+            try await db.writer.write { try Outbox.purgeSent($0) }
+            let pending = try await db.reader.read {
+                try OutboxEntry.filter(Column("state") == OutboxState.pending.rawValue).fetchCount($0)
+            }
+            let neverSynced = activeProjectId.map { lastPull[$0] == nil } ?? false
+            if pending > 0 || neverSynced { await setPhase(.syncing) }
+
+            if lastProjectListPull.map({ Date().timeIntervalSince($0) > 300 }) ?? true {
+                try await refreshProjects()
+            }
+
+            // After being offline (or idle for a while) look at GitHub first, so clashes are noticed before sending.
+            let stale = wasOffline || age(of: activeProjectId) > 45
+            if stale { try await pullActive() }
+            try await push()
+            if !stale, age(of: activeProjectId) >= pollInterval - 1 { try await pullActive() }
+
+            if let watchedIssueId, !watchedIssueId.hasPrefix(LocalID.prefix),
+               lastDetailPull.map({ Date().timeIntervalSince($0) >= pollInterval - 1 }) ?? true {
+                try await loadIssueDetail(contentId: watchedIssueId)
+            }
+            try await pullOneBackgroundProject()
+
+            wasOffline = false
+            await finish(.idle, syncedAt: Date())
+        } catch let error as APIError {
+            switch error {
+            case .unauthorized, .noToken:
+                await finish(.unauthorized)
+            case _ where error.isTransient:
+                wasOffline = true
+                await finish(.offline)
+            default:
+                await finish(.failed(error.localizedDescription))
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            await finish(.failed(error.localizedDescription))
+        }
+    }
+
+    private func age(of projectId: String?) -> TimeInterval {
+        guard let projectId, let date = lastPull[projectId] else { return .infinity }
+        return Date().timeIntervalSince(date)
+    }
+
+    private func pullActive() async throws {
+        guard let activeProjectId else { return }
+        try await pull(projectId: activeProjectId)
+    }
+
+    /// Other projects are refreshed one per cycle, at most every five minutes each, so "My Issues" stays usable.
+    private func pullOneBackgroundProject() async throws {
+        let ids = try await db.reader.read {
+            try String.fetchAll($0, sql: "SELECT id FROM project WHERE closed = 0")
+        }
+        guard let next = ids.first(where: { $0 != activeProjectId && age(of: $0) > 300 }) else { return }
+        do {
+            try await pull(projectId: next)
+        } catch let error as APIError where !error.isTransient {
+            // A project we cannot read should not stop everything else from syncing.
+            lastPull[next] = Date()
+        }
+    }
+
+    @MainActor
+    private func setPhase(_ phase: SyncStatus.Phase) {
+        status.phase = phase
+    }
+
+    @MainActor
+    private func finish(_ phase: SyncStatus.Phase, syncedAt: Date? = nil) {
+        status.phase = phase
+        if let syncedAt { status.lastSyncedAt = syncedAt }
+    }
+
+    @MainActor
+    private func post(_ notices: [Notice]) {
+        for notice in notices { status.post(notice) }
+    }
+
+    @MainActor
+    private func publish(remaps: [String: String]) {
+        status.idRemaps.merge(remaps) { _, new in new }
+    }
+
+    // MARK: Project list
+
+    public func refreshProjects() async throws {
+        let (viewer, projects) = try await api.viewerAndProjects()
+        try await db.writer.write { db in
+            try KV.setViewer(db, viewer)
+            let remoteIds = Set(projects.map(\.id))
+            for id in try String.fetchAll(db, sql: "SELECT id FROM project") where !remoteIds.contains(id) {
+                try Project.deleteOne(db, key: id)
+            }
+            for remote in projects {
+                if var local = try Project.fetchOne(db, key: remote.id) {
+                    local.title = remote.title
+                    local.url = remote.url
+                    local.closed = remote.closed
+                    local.viewerCanUpdate = remote.viewerCanUpdate
+                    local.ownerLogin = remote.ownerLogin
+                    try local.update(db)
+                } else {
+                    try remote.insert(db)
+                }
+            }
+        }
+        lastProjectListPull = Date()
+    }
+
+    // MARK: Pull
+
+    public func pull(projectId: String) async throws {
+        let meta = try await api.projectMeta(id: projectId)
+
+        let (local, dirtyIds, known) = try await db.reader.read { db -> (Project?, Set<String>, [String: String]) in
+            let project = try Project.fetchOne(db, key: projectId)
+            let dirty = try String.fetchSet(db, sql: "SELECT id FROM item WHERE projectId = ? AND dirty = 1", arguments: [projectId])
+            var known: [String: String] = [:]
+            for row in try Row.fetchAll(db, sql: "SELECT id, remoteUpdatedAt FROM item WHERE projectId = ?", arguments: [projectId]) {
+                known[row["id"]] = row["remoteUpdatedAt"] ?? ""
+            }
+            return (project, dirty, known)
+        }
+        guard let local else { return }
+
+        let changed = forceSweep.contains(projectId)
+            || local.lastSyncedAt == nil
+            || local.remoteUpdatedAt != meta.updatedAt
+            || local.itemsTotal != meta.itemsTotal
+            || !dirtyIds.isEmpty
+
+        var sweep: [SweepEntry] = []
+        var hydrated: [Item] = []
+        if changed {
+            sweep = try await api.sweep(projectId: projectId)
+            let wanted = sweep.filter { entry in
+                if dirtyIds.contains(entry.id) { return true }
+                if unhydratable[entry.id] == entry.updatedAt { return false }
+                return known[entry.id] != entry.updatedAt
+            }.map(\.id)
+            hydrated = try await api.hydrate(
+                itemIds: wanted, projectId: projectId,
+                statusFieldId: meta.statusField?.id, priorityFieldId: meta.priorityField?.id
+            )
+            let got = Set(hydrated.map(\.id))
+            for entry in sweep where wanted.contains(entry.id) && !got.contains(entry.id) {
+                unhydratable[entry.id] = entry.updatedAt
+            }
+            // A parent's sub-issue progress changes when a child does, without the parent being touched.
+            let parentContentIds = Set(hydrated.compactMap(\.parentId))
+            if !parentContentIds.isEmpty {
+                let parents = try await db.reader.read { db in
+                    try String.fetchAll(
+                        db,
+                        sql: "SELECT id FROM item WHERE projectId = ? AND contentId IN (\(parentContentIds.map { _ in "?" }.joined(separator: ",")))",
+                        arguments: StatementArguments([projectId] + Array(parentContentIds))
+                    )
+                }.filter { !got.contains($0) }
+                if !parents.isEmpty {
+                    hydrated += try await api.hydrate(
+                        itemIds: parents, projectId: projectId,
+                        statusFieldId: meta.statusField?.id, priorityFieldId: meta.priorityField?.id
+                    )
+                }
+            }
+        }
+
+        let sweepSnapshot = sweep
+        let hydratedSnapshot = hydrated
+        let notices = try await db.writer.write { db -> [Notice] in
+            guard var project = try Project.fetchOne(db, key: projectId) else { return [] }
+            project.title = meta.title
+            project.closed = meta.closed
+            project.viewerCanUpdate = meta.viewerCanUpdate
+            project.statusFieldId = meta.statusField?.id
+            project.priorityFieldId = meta.priorityField?.id
+            try Self.writeOptions(db, projectId: projectId, meta: meta)
+
+            var repos = meta.repos
+            for item in hydratedSnapshot {
+                if let id = item.repoId, let name = item.repo { repos.append((id, name)) }
+            }
+            try Self.writeRepos(db, projectId: projectId, repos: repos)
+
+            var notices: [Notice] = []
+            if changed {
+                notices += try Self.reconcile(db, hydrated: hydratedSnapshot)
+
+                var order: [String: Int] = [:]
+                for (index, entry) in sweepSnapshot.enumerated() { order[entry.id] = index }
+                for var item in hydratedSnapshot {
+                    item.position = Double((order[item.id] ?? sweepSnapshot.count) + 1) * 1024
+                    try item.save(db)
+                }
+                for (index, entry) in sweepSnapshot.enumerated() {
+                    try db.execute(sql: "UPDATE item SET position = ? WHERE id = ?", arguments: [Double(index + 1) * 1024, entry.id])
+                }
+
+                notices += try Self.removeMissing(db, projectId: projectId, remoteIds: Set(sweepSnapshot.map(\.id)))
+                try Outbox.rebase(db)
+                try Outbox.clearSettledDirtyFlags(db, projectId: projectId)
+                project.remoteUpdatedAt = meta.updatedAt
+                project.itemsTotal = meta.itemsTotal
+            }
+            project.lastSyncedAt = Date()
+            try project.update(db)
+            return notices
+        }
+        forceSweep.remove(projectId)
+        lastPull[projectId] = Date()
+        await post(notices)
+    }
+
+    private static func writeOptions(_ db: Database, projectId: String, meta: RemoteProjectMeta) throws {
+        var wanted: [FieldOption] = []
+        for (field, kind) in [(meta.statusField, OptionKind.status), (meta.priorityField, OptionKind.priority)] {
+            guard let field else { continue }
+            for (index, option) in field.options.enumerated() {
+                guard let id = option.id else { continue }
+                wanted.append(FieldOption(
+                    id: id, fieldId: field.id, projectId: projectId, kind: kind,
+                    name: option.name, color: option.color, descr: option.descr, position: index
+                ))
+            }
+        }
+        let existing = try FieldOption.filter(Column("projectId") == projectId).order(Column("kind"), Column("position")).fetchAll(db)
+        let sortedWanted = wanted.sorted { ($0.kind.rawValue, $0.position) < ($1.kind.rawValue, $1.position) }
+        guard existing != sortedWanted else { return }
+        try FieldOption.filter(Column("projectId") == projectId).deleteAll(db)
+        for option in wanted { try option.insert(db) }
+    }
+
+    private static func writeRepos(_ db: Database, projectId: String, repos: [(id: String, nameWithOwner: String)]) throws {
+        var seen = Set<String>()
+        for repo in repos where seen.insert(repo.id).inserted {
+            if try !RepoRef.exists(db, key: ["projectId": projectId, "id": repo.id]) {
+                try RepoRef(id: repo.id, nameWithOwner: repo.nameWithOwner, projectId: projectId).insert(db)
+            }
+        }
+    }
+
+    /// Compares unsent changes with what GitHub now has, before the fresh rows overwrite the local ones.
+    private static func reconcile(_ db: Database, hydrated: [Item]) throws -> [Notice] {
+        var notices: [Notice] = []
+        let byItemId = Dictionary(hydrated.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var byContentId: [String: Item] = [:]
+        for item in hydrated {
+            if let contentId = item.contentId { byContentId[contentId] = item }
+        }
+        let entries = try OutboxEntry
+            .filter([OutboxState.pending.rawValue, OutboxState.conflict.rawValue].contains(Column("state")))
+            .order(Column("id"))
+            .fetchAll(db)
+
+        for var entry in entries {
+            switch entry.mutation {
+            case .setField(var m):
+                guard let remote = byItemId[m.itemId] else { continue }
+                let theirs = m.kind == .status ? remote.statusId : remote.priorityId
+                guard theirs != m.base, theirs != m.optionId else { continue }
+                let theirName = try theirs.flatMap {
+                    try String.fetchOne(db, sql: "SELECT name FROM fieldOption WHERE fieldId = ? AND id = ?", arguments: [m.fieldId, $0])
+                }
+                let mineName = try m.optionId.flatMap {
+                    try String.fetchOne(db, sql: "SELECT name FROM fieldOption WHERE fieldId = ? AND id = ?", arguments: [m.fieldId, $0])
+                }
+                let what = m.kind == .status ? "status" : "priority"
+                var undo = m
+                undo.optionId = theirs
+                undo.base = m.optionId
+                notices.append(Notice(
+                    title: "\(remote.displayNumber) was also changed on GitHub",
+                    message: "Its \(what) was set to \(theirName ?? "none") there. Your change to \(mineName ?? "none") was applied last.",
+                    action: theirName.map { .applyField(undo, label: "Switch to \($0)") }
+                ))
+                m.base = theirs
+                entry.mutation = .setField(m)
+                try entry.update(db)
+
+            case .setTitle(var m):
+                guard let remote = byContentId[m.contentId] else { continue }
+                let state = reconcileText(&m, theirs: remote.title, mergeLines: false)
+                if state != entry.state || entry.mutation != .setTitle(m) {
+                    entry.state = state
+                    entry.mutation = .setTitle(m)
+                    try entry.update(db)
+                }
+
+            case .setBody(var m):
+                guard let remote = byContentId[m.contentId] else { continue }
+                let state = reconcileText(&m, theirs: remote.body, mergeLines: true)
+                if state != entry.state || entry.mutation != .setBody(m) {
+                    entry.state = state
+                    entry.mutation = .setBody(m)
+                    try entry.update(db)
+                }
+
+            default:
+                continue
+            }
+        }
+        return notices
+    }
+
+    /// Decides what to do with an unsent text edit given GitHub's current text.
+    static func reconcileText(_ m: inout Mutation.SetText, theirs: String, mergeLines: Bool) -> OutboxState {
+        if theirs == m.base || theirs == m.value {
+            m.theirs = nil
+            return .pending
+        }
+        if mergeLines, let merged = Diff3.merge(base: m.base, mine: m.value, theirs: theirs) {
+            m.value = merged
+            m.base = theirs
+            m.theirs = nil
+            return .pending
+        }
+        m.theirs = theirs
+        return .conflict
+    }
+
+    private static func removeMissing(_ db: Database, projectId: String, remoteIds: Set<String>) throws -> [Notice] {
+        var notices: [Notice] = []
+        let entries = try Outbox.active(db)
+        // An issue we created moments ago may not be listed yet.
+        let justCreated = Set(entries.compactMap { entry -> String? in
+            if case .createIssue(let m) = entry.mutation { return m.itemId }
+            return nil
+        })
+        let localItems = try Item.filter(Column("projectId") == projectId).fetchAll(db)
+        for item in localItems where !remoteIds.contains(item.id) && !item.isLocalOnly && !justCreated.contains(item.id) {
+            let orphaned = entries.filter {
+                $0.state != .sent && ($0.mutation.itemId == item.id || (item.contentId != nil && $0.mutation.contentId == item.contentId))
+            }
+            for entry in orphaned { try entry.delete(db) }
+            if !orphaned.isEmpty {
+                let count = orphaned.count
+                notices.append(Notice(
+                    title: "\(item.displayNumber) is no longer in this project",
+                    message: "It was removed or deleted on GitHub. Your \(count) queued change\(count == 1 ? "" : "s") to it \(count == 1 ? "was" : "were") discarded.",
+                    isWarning: true
+                ))
+            }
+            try item.delete(db)
+        }
+        return notices
+    }
+
+    // MARK: Push
+
+    private enum SendOutcome {
+        case sent([String: String])
+        case deferred
+    }
+
+    private func push() async throws {
+        var skipped = Set<Int64>()
+        while true {
+            let skip = skipped
+            let next = try await db.reader.read { db in
+                try OutboxEntry
+                    .filter(Column("state") == OutboxState.pending.rawValue)
+                    .order(Column("id"))
+                    .fetchAll(db)
+                    .first { !skip.contains($0.id ?? -1) }
+            }
+            guard let entry = next, let entryId = entry.id else { return }
+            do {
+                switch try await send(entry) {
+                case .sent(let remaps):
+                    try await db.writer.write { db in
+                        try Self.markSent(db, entryId: entryId, remaps: remaps)
+                    }
+                    if !remaps.isEmpty { await publish(remaps: remaps) }
+                case .deferred:
+                    skipped.insert(entryId)
+                }
+            } catch let error as APIError where error.isTransient || isAuthError(error) {
+                try? await db.writer.write { db in
+                    try db.execute(sql: "UPDATE outbox SET attempts = attempts + 1, lastError = ? WHERE id = ?", arguments: [error.localizedDescription, entryId])
+                }
+                throw error
+            } catch {
+                let notice = try await db.writer.write { db in
+                    try Self.discard(db, entryId: entryId, error: error)
+                }
+                if let projectId = activeProjectId { forceSweep.insert(projectId) }
+                if let notice { await post([notice]) }
+            }
+        }
+    }
+
+    private nonisolated func isAuthError(_ error: APIError) -> Bool {
+        switch error {
+        case .unauthorized, .noToken: true
+        default: false
+        }
+    }
+
+    private func send(_ entry: OutboxEntry) async throws -> SendOutcome {
+        if entry.mutation.referencedIds.contains(where: { $0.hasPrefix(LocalID.prefix) }) {
+            throw APIError.graphql([GraphQLErrorItem(message: "The issue this change belongs to was never created on GitHub.", type: "NOT_FOUND")])
+        }
+        switch entry.mutation {
+        case .setField(let m):
+            try await api.setFieldValue(projectId: m.projectId, itemId: m.itemId, fieldId: m.fieldId, optionId: m.optionId)
+
+        case .move(let m):
+            try await api.moveItem(projectId: m.projectId, itemId: m.itemId, afterId: m.afterItemId)
+
+        case .setTitle(var m):
+            let remote = try await api.issueText(contentId: m.contentId)
+            let state = Self.reconcileText(&m, theirs: remote.title, mergeLines: false)
+            try await store(entry, mutation: .setTitle(m), state: state)
+            guard state == .pending else { return .deferred }
+            try await api.updateIssue(contentId: m.contentId, title: m.value)
+
+        case .setBody(var m):
+            let remote = try await api.issueText(contentId: m.contentId)
+            let state = Self.reconcileText(&m, theirs: remote.body, mergeLines: true)
+            try await store(entry, mutation: .setBody(m), state: state)
+            guard state == .pending else { return .deferred }
+            try await api.updateIssue(contentId: m.contentId, body: m.value)
+
+        case .setState(let m):
+            if m.closed {
+                try await api.closeIssue(contentId: m.contentId, reason: m.reason ?? "COMPLETED")
+            } else {
+                try await api.reopenIssue(contentId: m.contentId)
+            }
+
+        case .editAssignees(let m):
+            try await api.editAssignees(contentId: m.contentId, add: m.add.map(\.id), remove: m.remove.map(\.id))
+
+        case .editLabels(let m):
+            try await api.editLabels(contentId: m.contentId, add: m.add.map(\.id), remove: m.remove.map(\.id))
+
+        case .addComment(let m):
+            let id = try await api.addComment(contentId: m.contentId, body: m.body)
+            return .sent([m.commentId: id])
+
+        case .createIssue(var m):
+            if m.createdContentId == nil {
+                let created = try await api.createIssue(
+                    repoId: m.repoId, title: m.title, body: m.body,
+                    assigneeIds: m.assignees.map(\.id), labelIds: m.labels.map(\.id),
+                    parentContentId: m.parentContentId
+                )
+                m.createdContentId = created.contentId
+                m.createdNumber = created.number
+                m.createdUrl = created.url
+                try await store(entry, mutation: .createIssue(m), state: .pending)
+            }
+            guard let contentId = m.createdContentId else { return .deferred }
+            let itemId = try await api.addToProject(projectId: m.projectId, contentId: contentId)
+            if let fieldId = m.statusFieldId, let optionId = m.statusId {
+                try await api.setFieldValue(projectId: m.projectId, itemId: itemId, fieldId: fieldId, optionId: optionId)
+            }
+            if let fieldId = m.priorityFieldId, let optionId = m.priorityId {
+                try await api.setFieldValue(projectId: m.projectId, itemId: itemId, fieldId: fieldId, optionId: optionId)
+            }
+            return .sent([m.itemId: itemId, m.contentId: contentId])
+        }
+        return .sent([:])
+    }
+
+    /// Saves a changed mutation (merged text, creation progress) back to its outbox row and re-applies it locally.
+    private func store(_ entry: OutboxEntry, mutation: Mutation, state: OutboxState) async throws {
+        guard mutation != entry.mutation || state != entry.state else { return }
+        var updated = entry
+        updated.mutation = mutation
+        updated.state = state
+        let snapshot = updated
+        try await db.writer.write { db in
+            try snapshot.update(db)
+            try mutation.applyLocally(db)
+            if case .createIssue(let m) = mutation {
+                try db.execute(sql: "UPDATE item SET number = ?, url = ? WHERE id = ?", arguments: [m.createdNumber, m.createdUrl, m.itemId])
+                try db.execute(sql: "UPDATE subIssue SET number = ?, url = ? WHERE id = ?", arguments: [m.createdNumber ?? 0, m.createdUrl, m.contentId])
+            }
+        }
+    }
+
+    private static func markSent(_ db: Database, entryId: Int64, remaps: [String: String]) throws {
+        try db.execute(
+            sql: "UPDATE outbox SET state = ?, sentAt = ? WHERE id = ?",
+            arguments: [OutboxState.sent.rawValue, Date(), entryId]
+        )
+        guard !remaps.isEmpty else { return }
+        for (old, new) in remaps {
+            try db.execute(sql: "UPDATE item SET id = ? WHERE id = ?", arguments: [new, old])
+            try db.execute(sql: "UPDATE item SET contentId = ? WHERE contentId = ?", arguments: [new, old])
+            try db.execute(sql: "UPDATE item SET parentId = ? WHERE parentId = ?", arguments: [new, old])
+            try db.execute(sql: "UPDATE comment SET id = ? WHERE id = ?", arguments: [new, old])
+            try db.execute(sql: "UPDATE comment SET issueId = ? WHERE issueId = ?", arguments: [new, old])
+            try db.execute(sql: "UPDATE subIssue SET id = ? WHERE id = ?", arguments: [new, old])
+            try db.execute(sql: "UPDATE subIssue SET parentId = ? WHERE parentId = ?", arguments: [new, old])
+        }
+        for var entry in try Outbox.active(db) {
+            let remapped = entry.mutation.remapping(remaps)
+            if remapped != entry.mutation {
+                entry.mutation = remapped
+                try entry.update(db)
+            }
+        }
+    }
+
+    /// Gives up on a change GitHub refused, and says so.
+    private static func discard(_ db: Database, entryId: Int64, error: Error) throws -> Notice? {
+        guard let entry = try OutboxEntry.fetchOne(db, key: entryId) else { return nil }
+        let summary = try entry.mutation.summary(db)
+        try entry.delete(db)
+        if case .createIssue(let m) = entry.mutation {
+            try Item.deleteOne(db, key: m.itemId)
+            try db.execute(sql: "DELETE FROM subIssue WHERE id = ?", arguments: [m.contentId])
+        }
+        if case .addComment(let m) = entry.mutation {
+            try Comment.deleteOne(db, key: m.commentId)
+        }
+        let gone = (error as? APIError)?.isNotFound ?? false
+        return Notice(
+            title: gone ? "\(summary.number) no longer exists on GitHub" : "A change to \(summary.number) could not be saved",
+            message: gone
+                ? "\"\(summary.text)\" was discarded."
+                : "\"\(summary.text)\" was discarded. \(error.localizedDescription)",
+            isWarning: true
+        )
+    }
+
+    // MARK: Issue detail and repository data
+
+    public func loadIssueDetail(contentId: String) async throws {
+        let detail = try await api.issueDetail(contentId: contentId)
+        try await db.writer.write { db in
+            try db.execute(
+                sql: "DELETE FROM comment WHERE issueId = ? AND id NOT LIKE ?",
+                arguments: [contentId, LocalID.prefix + "%"]
+            )
+            for comment in detail.comments { try comment.save(db) }
+            try db.execute(
+                sql: "DELETE FROM subIssue WHERE parentId = ? AND id NOT LIKE ?",
+                arguments: [contentId, LocalID.prefix + "%"]
+            )
+            for sub in detail.subIssues { try sub.save(db) }
+            try db.execute(
+                sql: "UPDATE item SET commentCount = ?, subTotal = ?, subCompleted = ? WHERE contentId = ?",
+                arguments: [detail.comments.count, detail.subIssues.count, detail.subIssues.filter(\.isClosed).count, contentId]
+            )
+            try Outbox.rebase(db)
+        }
+        if contentId == watchedIssueId { lastDetailPull = Date() }
+    }
+
+    /// Labels and assignable people of a repository, for the pickers. Cached for ten minutes.
+    public func loadRepoMeta(projectId: String, repoId: String, force: Bool = false) async throws {
+        let existing = try await db.reader.read { try RepoRef.fetchOne($0, key: ["projectId": projectId, "id": repoId]) }
+        if !force, let loaded = existing?.metaLoadedAt, Date().timeIntervalSince(loaded) < 600 { return }
+        let meta = try await api.repoMeta(repoId: repoId)
+        try await db.writer.write { db in
+            try db.execute(
+                sql: "UPDATE repo SET labels = ?, assignableUsers = ?, metaLoadedAt = ? WHERE id = ?",
+                arguments: [
+                    String(decoding: try JSONEncoder().encode(meta.labels), as: UTF8.self),
+                    String(decoding: try JSONEncoder().encode(meta.users), as: UTF8.self),
+                    Date(), repoId,
+                ]
+            )
+        }
+    }
+
+    // MARK: Columns
+
+    /// Adds, renames, recolours, reorders or removes status columns. Needs a connection; not queued.
+    public func updateOptions(projectId: String, fieldId: String, kind: OptionKind, options: [RemoteOption]) async throws {
+        let saved = try await api.updateFieldOptions(fieldId: fieldId, options: options)
+        try await db.writer.write { db in
+            try FieldOption.filter(Column("projectId") == projectId && Column("fieldId") == fieldId).deleteAll(db)
+            for (index, option) in saved.enumerated() {
+                guard let id = option.id else { continue }
+                try FieldOption(
+                    id: id, fieldId: fieldId, projectId: projectId, kind: kind,
+                    name: option.name, color: option.color, descr: option.descr, position: index
+                ).insert(db)
+            }
+            // Cards that sat in a removed column have no status any more.
+            let ids = saved.compactMap(\.id)
+            let column = kind == .status ? "statusId" : "priorityId"
+            let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+            try db.execute(
+                sql: "UPDATE item SET \(column) = NULL WHERE projectId = ? AND \(column) IS NOT NULL AND \(column) NOT IN (\(placeholders))",
+                arguments: StatementArguments([projectId] + ids)
+            )
+        }
+        forceSweep.insert(projectId)
+        kick()
+    }
+
+    /// Adds the opinionated Priority field to a project that has none.
+    public func createPriorityField(projectId: String) async throws {
+        _ = try await api.createSelectField(projectId: projectId, name: "Priority", options: Defaults.priorityOptions)
+        forceSweep.insert(projectId)
+        lastPull[projectId] = nil
+        try await pull(projectId: projectId)
+    }
+}

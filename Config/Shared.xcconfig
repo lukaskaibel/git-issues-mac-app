@@ -1,0 +1,14 @@
+// Settings shared by every build. Personal settings (your signing team) go in Local.xcconfig,
+// which is not checked in; copy Local.xcconfig.example to get started.
+
+// Version shown in the app and used for release tags. Follows semantic versioning.
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+PRODUCT_BUNDLE_IDENTIFIER = com.lukaskbl.GitIssues
+
+// Without a team the app is signed to run on this Mac only, which is all a local build needs.
+DEVELOPMENT_TEAM =
+CODE_SIGN_IDENTITY = -
+
+#include? "Local.xcconfig"

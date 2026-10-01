@@ -1,0 +1,237 @@
+import SwiftUI
+
+public struct RootView: View {
+    @Environment(AppModel.self) private var model
+
+    public init() {}
+
+    public var body: some View {
+        ZStack {
+            Theme.window.ignoresSafeArea()
+            if model.signedIn {
+                MainLayout()
+                    .transition(.opacity)
+            } else {
+                SignInView()
+                    .transition(.opacity)
+            }
+        }
+        .frame(minWidth: 980, minHeight: 600)
+        .font(.ui)
+        .foregroundStyle(Theme.text)
+        .tint(Theme.accent)
+        .animation(Theme.overlay, value: model.signedIn)
+        .onChange(of: model.status.idRemaps) { _, remaps in
+            model.follow(remaps: remaps)
+        }
+        .onChange(of: model.status.phase) { _, phase in
+            if phase == .unauthorized { model.signedIn = false }
+        }
+    }
+}
+
+struct MainLayout: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Sidebar()
+                .frame(width: Theme.sidebarWidth)
+            ContentPanel()
+        }
+        .ignoresSafeArea()
+        .overlay {
+            OverlayHost()
+        }
+        .overlay(alignment: .bottomTrailing) {
+            ToastStack()
+                .padding(20)
+        }
+    }
+}
+
+struct ContentPanel: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ZStack {
+            // The board stays mounted underneath an open issue so it is exactly as you left it on return.
+            VStack(spacing: 0) {
+                ProjectHeader()
+                if model.scope == nil {
+                    EmptyState(
+                        title: model.projects.isEmpty ? "Looking for your projects…" : "Choose a project",
+                        message: model.projects.isEmpty
+                            ? "Boards come from GitHub Projects. If you have none yet, create one on GitHub and it will show up here."
+                            : "Pick a project in the sidebar."
+                    )
+                } else if model.viewMode == .board, model.currentProjectId != nil {
+                    BoardView()
+                } else {
+                    IssueListView()
+                }
+            }
+            .opacity(model.openItem == nil ? 1 : 0)
+            .allowsHitTesting(model.openItem == nil)
+
+            if let item = model.openItem {
+                IssueDetailView(item: item)
+                    .id(item.id)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .offset(x: 14)),
+                        removal: .opacity.combined(with: .offset(x: 14))
+                    ))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.panelBorder, lineWidth: 1))
+        .overlay { SwipeIndicator() }
+        .padding(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 8))
+        .animation(Theme.overlay, value: model.openItemId)
+    }
+}
+
+/// The arrow that slides in from the edge while a two-finger swipe is deciding whether to go back or forward.
+struct SwipeIndicator: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let progress = model.swipeProgress
+        let amount = min(abs(progress), 1)
+        HStack {
+            if progress < 0 { Spacer() }
+            Image(systemName: progress > 0 ? "chevron.left" : "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(amount >= 0.5 ? Color.white : Theme.textSecondary)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(amount >= 0.5 ? Theme.accentFill : Theme.popover))
+                .overlay(Circle().stroke(Theme.popoverBorder, lineWidth: amount >= 0.5 ? 0 : 1))
+                .shadow(color: Theme.shadow, radius: 10, y: 4)
+                .scaleEffect(0.7 + 0.3 * amount)
+                .offset(x: (progress > 0 ? 1 : -1) * (-40 + 56 * amount))
+            if progress > 0 { Spacer() }
+        }
+        .opacity(amount == 0 ? 0 : 1)
+        .allowsHitTesting(false)
+    }
+}
+
+struct ProjectHeader: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        HStack(spacing: 8) {
+            switch model.scope {
+            case .project:
+                if let project = model.currentProject {
+                    ProjectSwatch(title: project.title)
+                    Text(project.title).font(.uiSemibold).lineLimit(1)
+                    ViewModeSwitch(mode: $model.viewMode)
+                        .padding(.leading, 10)
+                }
+            case .myIssues:
+                Image(systemName: "scope").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.textSecondary)
+                Text("My Issues").font(.uiSemibold)
+            case nil:
+                EmptyView()
+            }
+            Spacer()
+            if let project = model.currentProject, project.priorityFieldId == nil, project.viewerCanUpdate, project.lastSyncedAt != nil {
+                Button("Add Priority field") { model.addPriorityField(projectId: project.id) }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .help("This project has no Priority field. Add one with Urgent, High, Medium and Low.")
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .frame(height: Theme.headerHeight)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.panelBorder).frame(height: 1)
+        }
+    }
+}
+
+struct ViewModeSwitch: View {
+    @Binding var mode: ViewMode
+    @Namespace private var namespace
+
+    var body: some View {
+        HStack(spacing: 2) {
+            segment("Board", .board)
+            segment("List", .list)
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.control))
+    }
+
+    private func segment(_ title: String, _ value: ViewMode) -> some View {
+        Button {
+            withAnimation(Theme.spring) { mode = value }
+        } label: {
+            Text(title)
+                .font(.smallMedium)
+                .foregroundStyle(mode == value ? Theme.text : Theme.textSecondary)
+                .padding(.horizontal, 10)
+                .frame(height: 22)
+                .background {
+                    if mode == value {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Theme.segmentActive)
+                            .matchedGeometryEffect(id: "segment", in: namespace)
+                    }
+                }
+        }
+        .buttonStyle(PlainPressStyle())
+    }
+}
+
+struct EmptyState: View {
+    var title: String
+    var message: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(title).font(.uiSemibold)
+            Text(message)
+                .font(.ui)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Dimmed backdrop plus whichever modal is open: command palette or new issue.
+struct OverlayHost: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            if let overlay = model.overlay {
+                Theme.scrim
+                    .ignoresSafeArea()
+                    .onTapGesture { model.overlay = nil }
+                    .transition(.opacity)
+
+                Group {
+                    switch overlay {
+                    case .palette(let mode):
+                        CommandPalette(mode: mode)
+                            .id(mode)
+                            .padding(.top, 120)
+                    case .newIssue(let statusId, let parentItemId):
+                        NewIssueView(statusId: statusId, parentItemId: parentItemId)
+                            .padding(.top, 110)
+                    }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)).combined(with: .offset(y: -6)))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .animation(Theme.overlay, value: model.overlay)
+    }
+}

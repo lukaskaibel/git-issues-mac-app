@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Client ID of the GitHub OAuth app used for "Sign in with GitHub" (device flow). Leave empty to hide that button. -->
+	<key>GitHubClientID</key>
+	<string></string>
+</dict>
+</plist>

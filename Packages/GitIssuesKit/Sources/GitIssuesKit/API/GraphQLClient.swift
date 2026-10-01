@@ -1,0 +1,154 @@
+import Foundation
+import os
+
+public struct GraphQLErrorItem: Decodable, Sendable, Hashable {
+    public var message: String
+    public var type: String?
+}
+
+public enum APIError: Error, LocalizedError, Sendable {
+    case noToken
+    case unauthorized
+    case offline(String)
+    case rateLimited
+    case http(Int, String)
+    case graphql([GraphQLErrorItem])
+    case decoding(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .noToken: "Not signed in to GitHub."
+        case .unauthorized: "GitHub rejected the sign-in. Please sign in again."
+        case .offline(let detail): "Can't reach GitHub. \(detail)"
+        case .rateLimited: "GitHub's rate limit was reached. Syncing resumes shortly."
+        case .http(let code, _): "GitHub returned an error (\(code))."
+        case .graphql(let items): items.map(\.message).joined(separator: " ")
+        case .decoding(let detail): "Unexpected response from GitHub. \(detail)"
+        }
+    }
+
+    /// Worth retrying later without changing anything.
+    public var isTransient: Bool {
+        switch self {
+        case .offline, .rateLimited: true
+        case .http(let code, _): code >= 500
+        default: false
+        }
+    }
+
+    /// The thing the request referred to no longer exists (deleted, transferred, or access removed).
+    public var isNotFound: Bool {
+        if case .graphql(let items) = self {
+            return items.contains { $0.type == "NOT_FOUND" }
+        }
+        return false
+    }
+}
+
+public protocol TokenSource: Sendable {
+    func token() async throws -> String
+}
+
+public final class GraphQLClient: Sendable {
+    private let tokenSource: any TokenSource
+    private let session: URLSession
+    private let endpoint = URL(string: "https://api.github.com/graphql")!
+
+    public init(tokenSource: any TokenSource, session: URLSession? = nil) {
+        self.tokenSource = tokenSource
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 30
+            config.waitsForConnectivity = false
+            self.session = URLSession(configuration: config)
+        }
+    }
+
+    #if DEBUG
+    /// Lets development builds rehearse being offline without touching the network settings.
+    public static let simulateOffline = OSAllocatedUnfairLock(initialState: false)
+    #endif
+
+    private struct Envelope<T: Decodable>: Decodable {
+        var data: T?
+        var errors: [GraphQLErrorItem]?
+    }
+
+    static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+
+    /// Runs a query or mutation. With `allowPartial`, a response that carries both data and errors
+    /// (for example one inaccessible node in a list) returns the data instead of throwing.
+    public func run<T: Decodable>(
+        _ query: String,
+        variables: [String: Any?] = [:],
+        allowPartial: Bool = false,
+        as type: T.Type = T.self
+    ) async throws -> T {
+        #if DEBUG
+        if Self.simulateOffline.withLock({ $0 }) { throw APIError.offline("Simulated for testing.") }
+        #endif
+        let token = try await tokenSource.token()
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("GitIssues-Mac", forHTTPHeaderField: "User-Agent")
+        let cleaned = variables.mapValues { $0 ?? NSNull() }
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["query": query, "variables": cleaned])
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            throw APIError.offline(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.offline("No response.")
+        }
+        switch http.statusCode {
+        case 200: break
+        case 401: throw APIError.unauthorized
+        case 403, 429:
+            let text = String(data: data, encoding: .utf8) ?? ""
+            if http.value(forHTTPHeaderField: "x-ratelimit-remaining") == "0" || text.contains("rate limit") {
+                throw APIError.rateLimited
+            }
+            throw APIError.http(http.statusCode, text)
+        default:
+            throw APIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+
+        let envelope: Envelope<T>
+        do {
+            envelope = try Self.decoder.decode(Envelope<T>.self, from: data)
+        } catch {
+            // A failed mutation comes back as {"data": {"x": null}, "errors": [...]}, which may not decode as T.
+            if let errors = try? Self.decoder.decode(Envelope<EmptyData>.self, from: data).errors, !errors.isEmpty {
+                throw Self.classify(errors)
+            }
+            throw APIError.decoding(String(describing: error))
+        }
+        if let errors = envelope.errors, !errors.isEmpty {
+            if allowPartial, let data = envelope.data { return data }
+            throw Self.classify(errors)
+        }
+        guard let result = envelope.data else {
+            throw APIError.decoding("Empty response.")
+        }
+        return result
+    }
+
+    private struct EmptyData: Decodable {}
+
+    private static func classify(_ errors: [GraphQLErrorItem]) -> APIError {
+        if errors.contains(where: { $0.type == "RATE_LIMITED" }) { return .rateLimited }
+        return .graphql(errors)
+    }
+}
