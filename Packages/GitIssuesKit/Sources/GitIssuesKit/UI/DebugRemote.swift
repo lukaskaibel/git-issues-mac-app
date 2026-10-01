@@ -53,7 +53,7 @@ enum DebugRemote {
     private static func run(_ line: String, model: AppModel) {
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
         let argument = parts.count > 1 ? parts[1] : ""
-        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "back", "forward", "wait"]
+        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait"]
         if let command = parts.first, !readOnly.contains(command), model.currentProject?.title != sandboxTitle {
             log("refused \"\(line)\": the open project is not the sandbox")
             return
@@ -140,6 +140,8 @@ enum DebugRemote {
             if let setting = AppearanceSetting(rawValue: argument) { model.appearance = setting }
         case "icon":
             if let choice = AppIconChoice(rawValue: argument) { model.appIcon = choice }
+        case "settings":
+            model.settingsRequest += 1
         case "back":
             model.goBack()
         case "forward":

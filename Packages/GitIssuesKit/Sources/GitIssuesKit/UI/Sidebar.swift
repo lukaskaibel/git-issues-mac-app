@@ -155,6 +155,7 @@ struct SyncIndicator: View {
                 Picker("Appearance", selection: Bindable(model).appearance) {
                     ForEach(AppearanceSetting.allCases) { Text($0.title).tag($0) }
                 }
+                Button("Settings…") { model.settingsRequest += 1 }
                 Divider()
                 Button("Sign Out") { model.signOut() }
             } label: {

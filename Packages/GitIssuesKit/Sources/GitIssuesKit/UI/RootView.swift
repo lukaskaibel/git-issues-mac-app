@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
 
     public init() {}
 
@@ -21,6 +22,9 @@ public struct RootView: View {
         .foregroundStyle(Theme.text)
         .tint(Theme.accent)
         .animation(Theme.overlay, value: model.signedIn)
+        .onChange(of: model.settingsRequest) {
+            openSettings()
+        }
         .onChange(of: model.status.idRemaps) { _, remaps in
             model.follow(remaps: remaps)
         }

@@ -111,6 +111,8 @@ public final class AppModel {
     var swipeProgress: Double = 0
     /// Bumped when avatar images arrive, so painted rows redraw with them.
     var avatarVersion = 0
+    /// Bumped to ask for the settings window from places that cannot open it themselves.
+    var settingsRequest = 0
     var overlay: Overlay?
     /// Set while a board drag is in progress so keyboard shortcuts stay out of the way.
     var isDragging = false
@@ -138,7 +140,7 @@ public final class AppModel {
         signedIn = auth.isSignedIn
         viewMode = ViewMode(rawValue: UserDefaults.standard.string(forKey: "viewMode") ?? "") ?? .board
         appearance = AppearanceSetting(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system
-        appIcon = AppIconChoice(rawValue: UserDefaults.standard.string(forKey: "appIcon") ?? "") ?? .e
+        appIcon = AppIconChoice(rawValue: UserDefaults.standard.string(forKey: "appIcon") ?? "") ?? .standard
         appearance.apply()
         appIcon.apply()
         startObserving()

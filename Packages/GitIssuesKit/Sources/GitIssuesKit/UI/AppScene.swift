@@ -87,32 +87,9 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
 
             LabeledContent("App icon") {
-                VStack(alignment: .trailing, spacing: 6) {
-                    HStack(spacing: 10) {
-                        ForEach(AppIconChoice.allCases) { choice in
-                            Button {
-                                model.appIcon = choice
-                            } label: {
-                                Group {
-                                    if let image = choice.image {
-                                        Image(nsImage: image).resizable().interpolation(.high)
-                                    } else {
-                                        Color.gray.opacity(0.2)
-                                    }
-                                }
-                                .frame(width: 44, height: 44)
-                                .padding(3)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                        .stroke(model.appIcon == choice ? Color.accentColor : .clear, lineWidth: 2)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .help(choice.title)
-                            .accessibilityLabel(choice.title)
-                            .accessibilityAddTraits(model.appIcon == choice ? .isSelected : [])
-                        }
-                    }
+                VStack(alignment: .trailing, spacing: 8) {
+                    iconRow(AppIconChoice.light)
+                    iconRow(AppIconChoice.dark)
                     Text("Shown in the Dock while the app is open.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -131,5 +108,33 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func iconRow(_ choices: [AppIconChoice]) -> some View {
+        HStack(spacing: 10) {
+            ForEach(choices) { choice in
+                Button {
+                    model.appIcon = choice
+                } label: {
+                    Group {
+                        if let image = choice.image {
+                            Image(nsImage: image).resizable().interpolation(.high)
+                        } else {
+                            Color.gray.opacity(0.2)
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+                    .padding(3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(model.appIcon == choice ? Color.accentColor : .clear, lineWidth: 2)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(choice.title)
+                .accessibilityLabel(choice.title)
+                .accessibilityAddTraits(model.appIcon == choice ? .isSelected : [])
+            }
+        }
     }
 }

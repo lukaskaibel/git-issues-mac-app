@@ -268,29 +268,51 @@ enum Stage {
     case todo, doing, done
 }
 
+struct Palette {
+    var top: UInt32
+    var bottom: UInt32
+    var card: CGColor
+    var cardShadow: CGColor
+    var ink: CGColor
+    var todo: CGColor
+    var doing: CGColor
+    var doneTop: UInt32
+    var doneBottom: UInt32
+    var lane: CGColor
+
+    static let light = Palette(
+        top: 0xFFFFFF, bottom: 0xE4E7F0, card: color(0xFFFFFF), cardShadow: color(0x1A1B1E, 0.16), ink: color(0x1A1B1E, 0.78),
+        todo: color(0xA4A9B6), doing: color(0xF0A81E), doneTop: 0x7F87EE, doneBottom: 0x5058CC, lane: color(0x1A1B1E, 0.05)
+    )
+    static let dark = Palette(
+        top: 0x262930, bottom: 0x0E0F12, card: color(0x30343C), cardShadow: color(0x000000, 0.4), ink: color(0xFFFFFF, 0.8),
+        todo: color(0x9AA0AC), doing: color(0xF0B429), doneTop: 0x959CF7, doneBottom: 0x5B63D3, lane: color(0xFFFFFF, 0.05)
+    )
+}
+
 /// One card with a status ring and, optionally, text lines. The finished one is filled with the accent colour.
-func simpleCard(_ context: CGContext, _ rect: CGRect, _ stage: Stage, radius: CGFloat, ring ringRadius: CGFloat, lines: Bool, horizontal: Bool = false) {
+func simpleCard(_ context: CGContext, _ rect: CGRect, _ stage: Stage, palette: Palette, radius: CGFloat, ring ringRadius: CGFloat, lines: Bool, horizontal: Bool = false) {
     let done = stage == .done
     context.saveGState()
-    context.setShadow(offset: CGSize(width: 0, height: done ? -18 : -8), blur: done ? 38 : 18, color: done ? color(0x5058CC, 0.5) : color(0x1A1B1E, 0.16))
+    context.setShadow(offset: CGSize(width: 0, height: done ? -18 : -8), blur: done ? 38 : 18, color: done ? color(palette.doneBottom, 0.5) : palette.cardShadow)
     context.addPath(squircle(rect, radius))
-    context.setFillColor(done ? color(0x5058CC) : color(0xFFFFFF))
+    context.setFillColor(done ? color(palette.doneBottom) : palette.card)
     context.fillPath()
     context.restoreGState()
     if done {
         context.saveGState()
         context.addPath(squircle(rect, radius))
         context.clip()
-        gradient(context, [color(0x7F87EE), color(0x5058CC)], from: CGPoint(x: 0, y: rect.minY), to: CGPoint(x: 0, y: rect.maxY))
+        gradient(context, [color(palette.doneTop), color(palette.doneBottom)], from: CGPoint(x: 0, y: rect.minY), to: CGPoint(x: 0, y: rect.maxY))
         context.restoreGState()
     }
     let center = horizontal
         ? CGPoint(x: rect.minX + rect.height / 2, y: rect.midY)
         : CGPoint(x: rect.midX, y: lines ? rect.minY + ringRadius + 34 : rect.midY)
     if done {
-        checkRing(context, center: center, radius: ringRadius, ring: color(0xFFFFFF), mark: color(0x5058CC))
+        checkRing(context, center: center, radius: ringRadius, ring: color(0xFFFFFF), mark: color(palette.doneBottom))
     } else {
-        let tint = stage == .todo ? color(0xA4A9B6) : color(0xF0A81E)
+        let tint = stage == .todo ? palette.todo : palette.doing
         context.setStrokeColor(tint)
         context.setLineWidth(ringRadius * 0.36)
         let inset = ringRadius * 0.18
@@ -304,7 +326,7 @@ func simpleCard(_ context: CGContext, _ rect: CGRect, _ stage: Stage, radius: CG
         }
     }
     guard lines else { return }
-    let ink = done ? color(0xFFFFFF, 0.92) : color(0x1A1B1E, 0.78)
+    let ink = done ? color(0xFFFFFF, 0.92) : palette.ink
     if horizontal {
         let x = rect.minX + rect.height + 4
         fill(context, CGRect(x: x, y: rect.midY - 14, width: rect.maxX - x - 56, height: 28), radius: 14, ink)
@@ -316,29 +338,43 @@ func simpleCard(_ context: CGContext, _ rect: CGRect, _ stage: Stage, radius: CG
 }
 
 // Variant I: three columns as plain bars of different heights, the last one finished.
-let bars = render("I", top: 0xFFFFFF, bottom: 0xE4E7F0) { context in
-    let width: CGFloat = 192
-    let gap: CGFloat = 38
-    let left = plate.minX + (plate.width - 3 * width - 2 * gap) / 2
-    let heights: [CGFloat] = [440, 560, 330]
-    for (index, stage) in [Stage.todo, .doing, .done].enumerated() {
-        let rect = CGRect(x: left + CGFloat(index) * (width + gap), y: plate.minY + 132, width: width, height: heights[index])
-        simpleCard(context, rect, stage, radius: 52, ring: 46, lines: false)
-        // Rings sit near the top of each bar, like a column header.
-        _ = rect
+func barsIcon(_ palette: Palette) -> NSImage {
+    render("I", top: palette.top, bottom: palette.bottom) { context in
+        let width: CGFloat = 192
+        let gap: CGFloat = 38
+        let left = plate.minX + (plate.width - 3 * width - 2 * gap) / 2
+        let heights: [CGFloat] = [440, 560, 330]
+        for (index, stage) in [Stage.todo, .doing, .done].enumerated() {
+            let rect = CGRect(x: left + CGFloat(index) * (width + gap), y: plate.minY + 132, width: width, height: heights[index])
+            simpleCard(context, rect, stage, palette: palette, radius: 52, ring: 46, lines: false)
+        }
     }
 }
 
 // Variant J: three rows, like a checklist that knows about progress.
-let rows = render("J", top: 0xFFFFFF, bottom: 0xE4E7F0) { context in
-    let height: CGFloat = 168
-    let gap: CGFloat = 30
-    let top = plate.minY + (plate.height - 3 * height - 2 * gap) / 2
-    for (index, stage) in [Stage.todo, .doing, .done].enumerated() {
-        let rect = CGRect(x: plate.minX + 96, y: top + CGFloat(index) * (height + gap), width: plate.width - 192, height: height)
-        simpleCard(context, rect, stage, radius: 50, ring: 42, lines: true, horizontal: true)
+func rowsIcon(_ palette: Palette) -> NSImage {
+    render("J", top: palette.top, bottom: palette.bottom) { context in
+        let height: CGFloat = 168
+        let gap: CGFloat = 30
+        let top = plate.minY + (plate.height - 3 * height - 2 * gap) / 2
+        for (index, stage) in [Stage.todo, .doing, .done].enumerated() {
+            let rect = CGRect(x: plate.minX + 96, y: top + CGFloat(index) * (height + gap), width: plate.width - 192, height: height)
+            simpleCard(context, rect, stage, palette: palette, radius: 50, ring: 42, lines: true, horizontal: true)
+        }
     }
 }
+
+let bars = barsIcon(.light)
+let barsDark = barsIcon(.dark)
+let rows = rowsIcon(.light)
+let rowsDark = rowsIcon(.dark)
+
+// The accent board on a deeper plate, for people who keep their Dock dark.
+let boardAccentDark = board(BoardStyle(
+    top: 0x4B53C0, bottom: 0x20246E, lane: color(0xFFFFFF, 0.10), card: color(0xFFFFFF, 0.24), cardShadow: color(0x0B0D33, 0.35),
+    line: color(0xFFFFFF, 0.82), dots: [color(0xFFFFFF, 0.78), color(0xFFFFFF, 0.78)],
+    doneTop: 0xFFFFFF, doneBottom: 0xE9EBFF, doneMark: color(0x353CA8), doneInk: color(0x2A3090, 0.85)
+))
 
 // Variant K: two columns, three cards.
 let twoColumns = render("K", top: 0xFFFFFF, bottom: 0xE4E7F0) { context in
@@ -348,9 +384,9 @@ let twoColumns = render("K", top: 0xFFFFFF, bottom: 0xE4E7F0) { context in
     let top = plate.minY + 116
     fill(context, CGRect(x: left - 18, y: top - 18, width: width + 36, height: 628), radius: 62, color(0x1A1B1E, 0.05))
     fill(context, CGRect(x: left + width + gap - 18, y: top - 18, width: width + 36, height: 628), radius: 62, color(0x1A1B1E, 0.05))
-    simpleCard(context, CGRect(x: left, y: top, width: width, height: 284), .todo, radius: 48, ring: 44, lines: true)
-    simpleCard(context, CGRect(x: left, y: top + 308, width: width, height: 284), .doing, radius: 48, ring: 44, lines: true)
-    simpleCard(context, CGRect(x: left + width + gap, y: top, width: width, height: 284), .done, radius: 48, ring: 44, lines: true)
+    simpleCard(context, CGRect(x: left, y: top, width: width, height: 284), .todo, palette: .light, radius: 48, ring: 44, lines: true)
+    simpleCard(context, CGRect(x: left, y: top + 308, width: width, height: 284), .doing, palette: .light, radius: 48, ring: 44, lines: true)
+    simpleCard(context, CGRect(x: left + width + gap, y: top, width: width, height: 284), .done, palette: .light, radius: 48, ring: 44, lines: true)
 }
 
 // Variant L: one card per column, climbing towards done.
@@ -363,7 +399,7 @@ let rising = render("L", top: 0xFFFFFF, bottom: 0xE4E7F0) { context in
     for (index, stage) in [Stage.todo, .doing, .done].enumerated() {
         let x = left + CGFloat(index) * (width + gap)
         fill(context, CGRect(x: x, y: laneTop, width: width, height: 612), radius: 50, color(0x1A1B1E, 0.055))
-        simpleCard(context, CGRect(x: x + 18, y: laneTop + offsets[index], width: width - 36, height: 250), stage, radius: 38, ring: 38, lines: true)
+        simpleCard(context, CGRect(x: x + 18, y: laneTop + offsets[index], width: width - 36, height: 250), stage, palette: .light, radius: 38, ring: 38, lines: true)
     }
 }
 
@@ -391,7 +427,8 @@ func contactSheet(_ variants: [(String, NSImage)], name: String) throws {
         // Small sizes too: an icon has to read in the Dock and in Finder lists.
         image.draw(in: NSRect(x: x + 390, y: 34, width: 64, height: 64))
         image.draw(in: NSRect(x: x + 464, y: 50, width: 32, height: 32))
-        let label = NSAttributedString(string: String(variant.prefix(1)), attributes: [
+        let text = variant.contains("-") ? String(variant.prefix(1)) : variant
+        let label = NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: 44, weight: .semibold),
             .foregroundColor: NSColor(srgbRed: 0.1, green: 0.1, blue: 0.12, alpha: 1),
         ])
@@ -406,8 +443,14 @@ func contactSheet(_ variants: [(String, NSImage)], name: String) throws {
 let first: [(String, NSImage)] = [("A-lifted-card", lifted), ("B-columns", columns), ("C-status-ring", ring), ("D-card-stack", stack)]
 let second: [(String, NSImage)] = [("E-board-light", boardLight), ("F-board-dark", boardDark), ("G-board-accent", boardAccent), ("H-board-colour", boardColour)]
 let third: [(String, NSImage)] = [("I-three-bars", bars), ("J-three-rows", rows), ("K-two-columns", twoColumns), ("L-rising", rising)]
-for (name, image) in first + second + third { try save(image, "icon-\(name).png") }
+// The icons that ship in the app: four designs, each for a light and a dark plate.
+let dark: [(String, NSImage)] = [("G-dark-board-accent", boardAccentDark), ("I-dark-three-bars", barsDark), ("J-dark-three-rows", rowsDark)]
+for (name, image) in first + second + third + dark { try save(image, "icon-\(name).png") }
 try contactSheet(first, name: "contact-sheet.png")
 try contactSheet(second, name: "contact-sheet-2.png")
 try contactSheet(third, name: "contact-sheet-3.png")
-print("Wrote \(first.count + second.count + third.count) icons and three contact sheets to \(output.path)")
+try contactSheet(
+    [("E", boardLight), ("G", boardAccent), ("I", bars), ("J", rows), ("F", boardDark), ("G dark", boardAccentDark), ("I dark", barsDark), ("J dark", rowsDark)],
+    name: "contact-sheet-shipped.png"
+)
+print("Wrote \(first.count + second.count + third.count + dark.count) icons and four contact sheets to \(output.path)")

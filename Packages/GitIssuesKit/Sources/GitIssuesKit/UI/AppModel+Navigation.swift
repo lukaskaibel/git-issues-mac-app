@@ -33,31 +33,58 @@ enum AppearanceSetting: String, CaseIterable, Identifiable {
     }
 }
 
-/// The icons the app can wear in the Dock. The first one is also the icon of the app bundle.
+/// The icons the app can wear in the Dock: four designs, each on a light and on a dark plate.
+/// The first one is also the icon of the app bundle.
 enum AppIconChoice: String, CaseIterable, Identifiable {
-    case e, g, f, k, i, j
+    case boardLight = "e"
+    case colourLight = "g"
+    case barsLight = "i"
+    case checklistLight = "j"
+    case boardDark = "f"
+    case colourDark = "g-dark"
+    case barsDark = "i-dark"
+    case checklistDark = "j-dark"
+
+    static let light: [AppIconChoice] = [.boardLight, .colourLight, .barsLight, .checklistLight]
+    static let dark: [AppIconChoice] = [.boardDark, .colourDark, .barsDark, .checklistDark]
+    static let standard = AppIconChoice.boardLight
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .e: "Board"
-        case .g: "Board on colour"
-        case .f: "Board, dark"
-        case .k: "Two columns"
-        case .i: "Three bars"
-        case .j: "Checklist"
+        case .boardLight: "Board"
+        case .boardDark: "Board, dark"
+        case .colourLight: "Board on colour"
+        case .colourDark: "Board on colour, dark"
+        case .barsLight: "Three bars"
+        case .barsDark: "Three bars, dark"
+        case .checklistLight: "Checklist"
+        case .checklistDark: "Checklist, dark"
+        }
+    }
+
+    private var resource: String {
+        switch self {
+        case .boardLight: "icon-E"
+        case .boardDark: "icon-F"
+        case .colourLight: "icon-G"
+        case .colourDark: "icon-G-dark"
+        case .barsLight: "icon-I"
+        case .barsDark: "icon-I-dark"
+        case .checklistLight: "icon-J"
+        case .checklistDark: "icon-J-dark"
         }
     }
 
     var image: NSImage? {
-        Bundle.module.image(forResource: "icon-\(rawValue.uppercased())")
+        Bundle.module.image(forResource: resource)
     }
 
     @MainActor
     func apply() {
-        // The default is the bundle's own icon; setting nil hands the Dock back to it.
-        NSApplication.shared.applicationIconImage = self == .e ? nil : image
+        // The standard icon is the bundle's own; setting nil hands the Dock back to it.
+        NSApplication.shared.applicationIconImage = self == Self.standard ? nil : image
     }
 }
 

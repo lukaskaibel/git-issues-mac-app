@@ -287,6 +287,9 @@ private struct RootPalette: View {
                 model.appearance = setting
             })
         }
+        list.append(PaletteCommand(id: "settings", title: "Settings…", section: "Settings", icon: symbol("gearshape"), keys: ["⌘", ","]) {
+            model.settingsRequest += 1
+        })
         list.append(PaletteCommand(id: "refresh", title: "Sync with GitHub now", section: go, icon: symbol("arrow.triangle.2.circlepath"), keys: ["⌘", "R"]) {
             model.refresh()
         })
