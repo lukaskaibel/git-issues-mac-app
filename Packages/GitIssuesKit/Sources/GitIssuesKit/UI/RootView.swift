@@ -69,12 +69,18 @@ struct ContentPanel: View {
                             ? "Boards come from GitHub Projects. If you have none yet, create one on GitHub and it will show up here."
                             : "Pick a project in the sidebar."
                     )
+                } else if model.isLoadingProject {
+                    ProjectLoadingState()
+                        .transition(.opacity)
                 } else if model.viewMode == .board, model.currentProjectId != nil {
                     BoardView()
+                        .transition(.opacity)
                 } else {
                     IssueListView()
+                        .transition(.opacity)
                 }
             }
+            .animation(Theme.overlay, value: model.isLoadingProject)
             .opacity(model.openItem == nil ? 1 : 0)
             .allowsHitTesting(model.openItem == nil)
 
@@ -192,20 +198,62 @@ struct ViewModeSwitch: View {
     }
 }
 
-struct EmptyState: View {
+struct EmptyState<Accessory: View>: View {
     var title: String
     var message: String
+    var showsProgress: Bool
+    var accessory: Accessory
+
+    init(title: String, message: String, showsProgress: Bool = false, @ViewBuilder accessory: () -> Accessory) {
+        self.title = title
+        self.message = message
+        self.showsProgress = showsProgress
+        self.accessory = accessory()
+    }
 
     var body: some View {
         VStack(spacing: 6) {
+            if showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.bottom, 6)
+            }
             Text(title).font(.uiSemibold)
             Text(message)
                 .font(.ui)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
+            accessory
+                .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+extension EmptyState where Accessory == EmptyView {
+    init(title: String, message: String, showsProgress: Bool = false) {
+        self.init(title: title, message: message, showsProgress: showsProgress) { EmptyView() }
+    }
+}
+
+/// Shown in the board and the list alike until a project has been fetched from GitHub once.
+/// Afterwards the local copy is shown straight away and refreshed in the background.
+struct ProjectLoadingState: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        switch model.status.phase {
+        case .offline:
+            EmptyState(title: "You're offline", message: "This project loads as soon as you're back online.")
+        case .failed(let message):
+            EmptyState(title: "This project couldn't be loaded", message: message) {
+                Button("Try Again") { model.refresh() }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+        default:
+            EmptyState(title: "Loading issues…", message: "Fetching this project from GitHub.", showsProgress: true)
+        }
     }
 }
 

@@ -6,6 +6,17 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Clicking the account at the top of the sidebar opens a menu with Sync Now, Appearance, Settings and Sign Out.
+  The separate "…" button next to the sync status is gone.
+- The sync status sits lower, lines up with the sidebar's icons, and shows a capsule on hover.
+
+### Fixed
+
+- The board now shows a loading state while a project is fetched for the first time, as the list already did.
+  Both say so when you are offline or the project can't be loaded, instead of loading forever.
+
 ## [0.1.0] - 2026-10-01
 
 First public version.

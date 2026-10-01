@@ -314,6 +314,11 @@ public final class AppModel {
         currentProjectId.flatMap { id in projects.first { $0.id == id } }
     }
 
+    /// True until the open project has been fetched from GitHub once.
+    var isLoadingProject: Bool {
+        currentProject.map { $0.lastSyncedAt == nil } ?? false
+    }
+
     var openItem: Item? {
         openItemId.flatMap { id in allItems.first { $0.id == id } }
     }

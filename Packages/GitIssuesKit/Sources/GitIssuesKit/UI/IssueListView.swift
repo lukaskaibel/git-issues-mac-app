@@ -34,13 +34,11 @@ struct IssueListView: View {
 
     private var emptyTitle: String {
         if model.scope == .myIssues { return "Nothing assigned to you" }
-        return model.currentProject?.lastSyncedAt == nil ? "Loading issues…" : "No issues yet"
+        return "No issues yet"
     }
 
     private var emptyMessage: String {
         if model.scope == .myIssues { return "Issues assigned to you on any of your project boards show up here." }
-        return model.currentProject?.lastSyncedAt == nil
-            ? "Fetching this project from GitHub."
-            : "Press C to create the first one. Only issues that are in this GitHub Project appear here."
+        return "Press C to create the first one. Only issues that are in this GitHub Project appear here."
     }
 }

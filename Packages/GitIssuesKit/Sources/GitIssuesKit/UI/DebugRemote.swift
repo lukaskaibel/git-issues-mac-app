@@ -53,7 +53,7 @@ enum DebugRemote {
     private static func run(_ line: String, model: AppModel) {
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
         let argument = parts.count > 1 ? parts[1] : ""
-        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait"]
+        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait", "renderpill"]
         if let command = parts.first, !readOnly.contains(command), model.currentProject?.title != sandboxTitle {
             log("refused \"\(line)\": the open project is not the sandbox")
             return
@@ -174,6 +174,35 @@ enum DebugRemote {
             withAnimation(Theme.spring) { model.saveColumns(projectId: projectId, options) }
         case "body":
             if let item = model.openItem { model.setBody(item, to: argument.replacingOccurrences(of: "\\n", with: "\n")) }
+        case "forget":
+            if let projectId = model.currentProjectId {
+                try? model.db.writer.write { db in
+                    try db.execute(sql: "DELETE FROM item WHERE projectId = ?", arguments: [projectId])
+                    try db.execute(sql: "DELETE FROM fieldOption WHERE projectId = ?", arguments: [projectId])
+                    try db.execute(
+                        sql: "UPDATE project SET lastSyncedAt = NULL, remoteUpdatedAt = NULL, itemsTotal = NULL WHERE id = ?",
+                        arguments: [projectId]
+                    )
+                }
+                model.refresh()
+            }
+        case "renderpill":
+            // Writes the sync pill in both states next to the command file, to check its padding.
+            for highlighted in [false, true] {
+                let renderer = ImageRenderer(
+                    content: SyncPill(highlighted: highlighted)
+                        .environment(model)
+                        .padding(12)
+                        .background(Theme.window)
+                        .environment(\.colorScheme, NSApp.effectiveAppearance.isDark ? .dark : .light)
+                )
+                renderer.scale = 3
+                if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+                   let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]),
+                   let path = UserDefaults.standard.string(forKey: "debugCommandFile") {
+                    try? png.write(to: URL(fileURLWithPath: path + (highlighted ? ".pill-on.png" : ".pill-off.png")))
+                }
+            }
         case "comment":
             if let item = model.openItem { model.addComment(to: item, body: argument) }
         case "notice":

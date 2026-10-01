@@ -19,12 +19,7 @@ struct Sidebar: View {
             .frame(height: 44)
 
             HStack(spacing: 8) {
-                if let viewer = model.viewer {
-                    Avatar(login: viewer.login, url: viewer.avatarUrl, size: 20)
-                    Text(viewer.login).font(.uiSemibold).lineLimit(1)
-                } else {
-                    Text("GitHub").font(.uiSemibold)
-                }
+                AccountMenu()
                 Spacer(minLength: 4)
                 Button {
                     model.overlay = .newIssue(statusId: nil, parentItemId: nil)
@@ -40,7 +35,7 @@ struct Sidebar: View {
                 .accessibilityLabel("New issue")
                 .disabled(model.currentProjectId == nil)
             }
-            .padding(.horizontal, 6)
+            .padding(.trailing, 6)
             .frame(height: 32)
             .padding(.bottom, 8)
 
@@ -85,7 +80,50 @@ struct Sidebar: View {
             SyncIndicator()
         }
         .padding(.horizontal, 10)
-        .padding(.bottom, 12)
+        .padding(.bottom, 8)
+    }
+}
+
+/// The account at the top of the sidebar. Clicking it opens everything about the session.
+struct AccountMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Menu {
+            if let login = model.viewer?.login {
+                Text("Signed in as \(login)")
+            }
+            Button("Sync Now") { model.refresh() }
+            Divider()
+            Picker("Appearance", selection: Bindable(model).appearance) {
+                ForEach(AppearanceSetting.allCases) { Text($0.title).tag($0) }
+            }
+            Button("Settings…") { model.settingsRequest += 1 }
+            Divider()
+            Button("Sign Out") { model.signOut() }
+        } label: {
+            HStack(spacing: 8) {
+                if let viewer = model.viewer {
+                    Avatar(login: viewer.login, url: viewer.avatarUrl, size: 20)
+                    Text(viewer.login).font(.uiSemibold).lineLimit(1)
+                } else {
+                    Text("GitHub").font(.uiSemibold)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .foregroundStyle(Theme.text)
+            .padding(.horizontal, 6)
+            .frame(height: 28)
+            .hoverFill()
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Account")
     }
 }
 
@@ -122,54 +160,46 @@ struct SidebarRow: View {
 struct SyncIndicator: View {
     @Environment(AppModel.self) private var model
     @State private var showQueue = false
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button {
-                showQueue.toggle()
-            } label: {
-                HStack(spacing: 8) {
-                    indicator
-                    TimelineView(.periodic(from: .now, by: 20)) { _ in
-                        Text(text)
-                            .font(.small)
-                            .foregroundStyle(isOffline ? Theme.text : Theme.textSecondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 6)
-                .frame(height: 28)
-                .hoverFill()
-            }
-            .buttonStyle(PlainPressStyle())
-            .popover(isPresented: $showQueue, arrowEdge: .top) {
-                QueuePopover()
-            }
-
-            Menu {
-                if let login = model.viewer?.login {
-                    Text("Signed in as \(login)")
-                }
-                Button("Refresh") { model.refresh() }
-                Picker("Appearance", selection: Bindable(model).appearance) {
-                    ForEach(AppearanceSetting.allCases) { Text($0.title).tag($0) }
-                }
-                Button("Settings…") { model.settingsRequest += 1 }
-                Divider()
-                Button("Sign Out") { model.signOut() }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 24, height: 24)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .tint(Theme.textSecondary)
-            .fixedSize()
-            .accessibilityLabel("Account")
+        Button {
+            showQueue.toggle()
+        } label: {
+            SyncPill(highlighted: hovering || showQueue)
         }
+        .buttonStyle(PlainPressStyle())
+        .onHover { hovering = $0 }
+        // The pill's padding would push the dot right of the sidebar's other icons; pull it back in line.
+        .padding(.leading, -4)
+        .popover(isPresented: $showQueue, arrowEdge: .top) {
+            QueuePopover()
+        }
+        .help("Queued changes")
+    }
+}
+
+/// Sync state as a small pill: a dot and a line of text, with a capsule behind it on hover.
+struct SyncPill: View {
+    @Environment(AppModel.self) private var model
+    var highlighted: Bool
+
+    var body: some View {
+        HStack(spacing: 7) {
+            indicator
+            TimelineView(.periodic(from: .now, by: 20)) { _ in
+                Text(text)
+                    .font(.small)
+                    .foregroundStyle(isOffline ? Theme.text : Theme.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 12)
+        .frame(height: 26)
+        .background(Capsule().fill(highlighted ? Theme.hover : .clear))
+        .contentShape(Capsule())
+        .animation(Theme.quick, value: highlighted)
     }
 
     private var isOffline: Bool { model.status.phase == .offline }
