@@ -99,7 +99,8 @@ extension AppModel {
         guard keyMonitorToken == nil else { return }
         keyMonitorToken = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            return MainActor.assumeIsolated { self.handle(event) ? nil : event }
+            let handled = MainActor.assumeIsolated { self.handle(event) }
+            return handled ? nil : event
         }
     }
 

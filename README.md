@@ -98,6 +98,13 @@ open GitIssues.xcodeproj
 
 Press **Run** (⌘R) in Xcode. Dependencies are fetched automatically on the first build.
 
+To use the app day to day without Xcode, build an optimised copy instead. The script quits a running copy and opens
+the new one, so you can run it again after pulling changes:
+
+```bash
+Tools/run-release.sh
+```
+
 Without any setup the app is signed to run on your Mac only, which is all a local build needs. To sign with your own
 Apple Developer team, copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` and fill in your team ID.
 

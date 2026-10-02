@@ -142,26 +142,29 @@ extension AppModel {
         NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [weak self] event in
             guard let self, event.buttonNumber == 3 || event.buttonNumber == 4 else { return event }
             let number = event.buttonNumber
-            return MainActor.assumeIsolated {
-                guard self.signedIn else { return event }
+            let handled = MainActor.assumeIsolated {
+                guard self.signedIn else { return false }
                 if number == 3 { self.goBack() } else { self.goForward() }
-                return nil
+                return true
             }
+            return handled ? nil : event
         }
         // Three-finger swipe, when "Swipe between pages" is set to three fingers.
         NSEvent.addLocalMonitorForEvents(matching: .swipe) { [weak self] event in
             guard let self, event.deltaX != 0 else { return event }
             let back = event.deltaX > 0
-            return MainActor.assumeIsolated {
-                guard self.signedIn else { return event }
+            let handled = MainActor.assumeIsolated {
+                guard self.signedIn else { return false }
                 if back { self.goBack() } else { self.goForward() }
-                return nil
+                return true
             }
+            return handled ? nil : event
         }
         // Two-finger swipe, as in Safari.
         NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             guard let self else { return event }
-            return MainActor.assumeIsolated { self.trackSwipe(event) ? nil : event }
+            let handled = MainActor.assumeIsolated { self.trackSwipe(event) }
+            return handled ? nil : event
         }
     }
 
