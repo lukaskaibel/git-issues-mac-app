@@ -95,6 +95,33 @@ extension AppModel {
         moveFocus(to: column.items[min(max(row + delta, 0), column.items.count - 1)].id)
     }
 
+    /// How long after a dialog opens keystrokes are held for its text field.
+    static let typeAheadWindow: TimeInterval = 0.5
+
+    private func hold(_ event: NSEvent) {
+        heldKeys.append(event)
+        guard heldKeysTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.01, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else {
+                    timer.invalidate()
+                    return
+                }
+                let fieldHasFocus = NSApp.keyWindow?.firstResponder is NSTextView
+                let expired = self.overlayOpenedAt.map { Date().timeIntervalSince($0) >= Self.typeAheadWindow } ?? true
+                guard fieldHasFocus || expired || self.overlay == nil else { return }
+                timer.invalidate()
+                self.heldKeysTimer = nil
+                let events = self.heldKeys
+                self.heldKeys = []
+                // Sent again in order; now that the field has focus they go straight to it.
+                for event in events { NSApp.sendEvent(event) }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        heldKeysTimer = timer
+    }
+
     func installKeyMonitor() {
         guard keyMonitorToken == nil else { return }
         keyMonitorToken = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -117,8 +144,17 @@ extension AppModel {
             }
             return false
         }
-        // Overlays and text fields handle their own keys.
-        if overlay != nil { return false }
+        // Overlays and text fields handle their own keys. A dialog's text field only takes focus once the
+        // dialog is on screen, so typing that starts right away is held and handed over when it can land.
+        if overlay != nil {
+            let fieldHasFocus = NSApp.keyWindow?.firstResponder is NSTextView
+            let justOpened = overlayOpenedAt.map { Date().timeIntervalSince($0) < Self.typeAheadWindow } ?? false
+            if !heldKeys.isEmpty || (!fieldHasFocus && justOpened && modifiers.isEmpty && !isEscape) {
+                hold(event)
+                return true
+            }
+            return false
+        }
         if let responder = NSApp.keyWindow?.firstResponder, responder is NSTextView { return false }
         guard modifiers.isEmpty else { return false }
 

@@ -113,7 +113,15 @@ public final class AppModel {
     var avatarVersion = 0
     /// Bumped to ask for the settings window from places that cannot open it themselves.
     var settingsRequest = 0
-    var overlay: Overlay?
+    var overlay: Overlay? {
+        didSet {
+            if overlay != nil, overlay != oldValue { overlayOpenedAt = Date() }
+        }
+    }
+    /// When the current dialog or palette opened, and keys typed before its text field had focus.
+    @ObservationIgnored var overlayOpenedAt: Date?
+    @ObservationIgnored var heldKeys: [NSEvent] = []
+    @ObservationIgnored var heldKeysTimer: Timer?
     /// Set while a board drag is in progress so keyboard shortcuts stay out of the way.
     var isDragging = false
     /// Bumped when Escape is pressed during a drag.

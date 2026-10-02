@@ -17,7 +17,7 @@ enum DebugRemote {
         // Keep timers running at full rate while the window is in the background.
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "Debug remote")
         processed = (try? String(contentsOfFile: path, encoding: .utf8))?.split(separator: "\n").count ?? 0
-        timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { _ in
             MainActor.assumeIsolated {
                 guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return }
                 let lines = text.split(separator: "\n").map(String.init)
@@ -53,7 +53,7 @@ enum DebugRemote {
     private static func run(_ line: String, model: AppModel) {
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
         let argument = parts.count > 1 ? parts[1] : ""
-        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait", "renderpill"]
+        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait", "renderpill", "responder", "click", "key", "keycode", "keycmd", "overlay"]
         if let command = parts.first, !readOnly.contains(command), model.currentProject?.title != sandboxTitle {
             log("refused \"\(line)\": the open project is not the sandbox")
             return
@@ -82,11 +82,34 @@ enum DebugRemote {
             }
         case "key":
             sendKeys(argument)
+        case "keycmd":
+            // keycmd <character>: a menu shortcut such as ⌘N.
+            if let character = argument.first {
+                sendKey(characters: String(character), code: 0, modifiers: .command)
+            }
+        case "click":
+            // click <x> <y> in points from the window's top-left corner, as a left mouse click.
+            let bits = argument.split(separator: " ").compactMap { Double($0) }
+            if bits.count == 2 { click(at: CGPoint(x: bits[0], y: bits[1])) }
+        case "responder":
+            // Which control has the keyboard focus: the field editor means a single-line text field.
+            let window = NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frame.width > 600 }
+            let responder = window?.firstResponder
+            var description = responder.map { String(describing: type(of: $0)) } ?? "nil"
+            if let text = responder as? NSTextView {
+                description += text.isFieldEditor ? " (single-line field, text: \"\(text.string)\")" : " (multi-line editor)"
+                if let field = text.delegate as? NSView, let content = window?.contentView {
+                    let frame = field.convert(field.bounds, to: content)
+                    description += " at x=\(Int(frame.minX)) y=\(Int(content.bounds.height - frame.maxY)) w=\(Int(frame.width))"
+                }
+                if let key = NSApp.keyWindow { description += " keyWindow=\(key.frame.width)" } else { description += " keyWindow=nil" }
+            }
+            log("responder: \(description) overlay=\(String(describing: model.overlay))")
         case "keycode":
             // keycode <code> [cmd]
             let bits = argument.split(separator: " ").map(String.init)
             if let code = bits.first.flatMap({ UInt16($0) }) {
-                sendKey(characters: code == 36 ? "\r" : "", code: code, modifiers: bits.contains("cmd") ? .command : [])
+                sendKey(characters: code == 36 ? "\r" : (code == 51 ? "\u{7F}" : ""), code: code, modifiers: bits.contains("cmd") ? .command : [])
             }
         case "status":
             let bits = argument.split(separator: " ", maxSplits: 1).map(String.init)
@@ -293,6 +316,20 @@ enum DebugRemote {
                         times.filter { $0 > 8 }.count, times.filter { $0 > 16 }.count
                     ))
                 }
+            }
+        }
+    }
+
+    private static func click(at point: CGPoint) {
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 }),
+              let content = window.contentView else { return }
+        let location = CGPoint(x: point.x, y: content.bounds.height - point.y)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            if let event = NSEvent.mouseEvent(
+                with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            ) {
+                NSApp.sendEvent(event)
             }
         }
     }

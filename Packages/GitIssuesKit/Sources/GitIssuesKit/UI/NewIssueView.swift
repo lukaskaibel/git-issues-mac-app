@@ -146,6 +146,10 @@ struct NewIssueView: View {
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.popoverBorder, lineWidth: 1))
         .shadow(color: Theme.shadow, radius: 40, y: 24)
         .onAppear(perform: prepare)
+        .task {
+            try? await Task.sleep(for: .milliseconds(300))
+            if focus == nil { focus = .title }
+        }
         .onExitCommand { model.overlay = nil }
     }
 

@@ -21,6 +21,9 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- Typing straight after pressing C (or ⌘N, or ⌘K) no longer loses the first letters: keys pressed before the
+  title field has focus are held and handed to it. If anything takes focus away while the new-issue dialog
+  appears, the title gets it back.
 - The board now shows a loading state while a project is fetched for the first time, as the list already did.
   Both say so when you are offline or the project can't be loaded, instead of loading forever.
 
