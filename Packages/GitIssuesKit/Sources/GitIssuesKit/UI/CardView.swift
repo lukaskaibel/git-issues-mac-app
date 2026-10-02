@@ -259,5 +259,12 @@ struct ItemContextMenu: View {
             Button("Copy Link") { model.copyLink(item) }
             Button("Open on GitHub") { model.openOnGitHub(item) }
         }
+        if item.kind == .issue || item.kind == .draft {
+            Divider()
+            Button(item.kind == .draft ? "Delete Draft…" : "Delete Issue…", role: .destructive) {
+                model.requestDelete(item)
+            }
+            .disabled(!model.canDelete(item))
+        }
     }
 }

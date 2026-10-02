@@ -53,7 +53,7 @@ enum DebugRemote {
     private static func run(_ line: String, model: AppModel) {
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
         let argument = parts.count > 1 ? parts[1] : ""
-        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait", "renderpill", "responder", "click", "key", "keycode", "keycmd", "overlay"]
+        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait", "renderpill", "responder", "click", "key", "keycode", "keycmd", "overlay", "focusdesc"]
         if let command = parts.first, !readOnly.contains(command), model.currentProject?.title != sandboxTitle {
             log("refused \"\(line)\": the open project is not the sandbox")
             return
@@ -82,6 +82,15 @@ enum DebugRemote {
             }
         case "key":
             sendKeys(argument)
+        case "requestdelete":
+            if let item = item(argument, model) { model.requestDelete(item) }
+        case "focusdesc":
+            // Puts the caret at the end of the open issue's description.
+            if let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 }),
+               let editor = findDescription(in: window.contentView) {
+                window.makeFirstResponder(editor)
+                editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+            }
         case "keycmd":
             // keycmd <character>: a menu shortcut such as ⌘N.
             if let character = argument.first {
@@ -179,6 +188,7 @@ enum DebugRemote {
             }
             log("  project=\(model.currentProject?.title ?? "-") mode=\(model.viewMode.rawValue)")
             log("  columns=\(model.columns.map(\.title).joined(separator: " | ")) sections=\(model.sections.map(\.title).joined(separator: " | ")) columnDrag=\(String(describing: drag.column))")
+            log("  deletion=\(model.deletionCandidate?.displayNumber ?? "-") canDelete18=\(model.scopedItems.first { $0.number == 18 }.map { model.canDelete($0) } ?? false)")
             log("  overlay=\(String(describing: model.overlay)) open=\(model.openItem?.displayNumber ?? "-") focus=\(model.targetItem?.displayNumber ?? "-") phase=\(model.status.phase) pending=\(model.pendingCount)")
         case "column":
             // column add <name> | column delete <name> | column rename <old>=<new>
@@ -318,6 +328,15 @@ enum DebugRemote {
                 }
             }
         }
+    }
+
+    private static func findDescription(in view: NSView?) -> MarkdownTextView? {
+        guard let view else { return nil }
+        if let editor = view as? MarkdownTextView { return editor }
+        for subview in view.subviews {
+            if let found = findDescription(in: subview) { return found }
+        }
+        return nil
     }
 
     private static func click(at point: CGPoint) {

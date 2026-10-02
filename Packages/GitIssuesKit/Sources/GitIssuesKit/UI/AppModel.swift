@@ -113,6 +113,8 @@ public final class AppModel {
     var avatarVersion = 0
     /// Bumped to ask for the settings window from places that cannot open it themselves.
     var settingsRequest = 0
+    /// The issue waiting for "Delete?" to be confirmed.
+    var deletionCandidate: Item?
     var overlay: Overlay? {
         didSet {
             if overlay != nil, overlay != oldValue { overlayOpenedAt = Date() }

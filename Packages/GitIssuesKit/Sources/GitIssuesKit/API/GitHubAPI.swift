@@ -358,6 +358,22 @@ public final class GitHubAPI: Sendable {
         let _: Ack = try await client.run(query, variables: ["id": contentId, "r": reason])
     }
 
+    /// Deletes an issue for good. GitHub only allows it with admin rights in the repository.
+    public func deleteIssue(contentId: String) async throws {
+        let query = """
+        mutation($id: ID!) { deleteIssue(input: {issueId: $id}) { clientMutationId } }
+        """
+        let _: Ack = try await client.run(query, variables: ["id": contentId])
+    }
+
+    /// Removes an item from a project. For a draft issue, that deletes it.
+    public func deleteProjectItem(projectId: String, itemId: String) async throws {
+        let query = """
+        mutation($p: ID!, $i: ID!) { deleteProjectV2Item(input: {projectId: $p, itemId: $i}) { deletedItemId } }
+        """
+        let _: Ack = try await client.run(query, variables: ["p": projectId, "i": itemId])
+    }
+
     public func reopenIssue(contentId: String) async throws {
         let query = """
         mutation($id: ID!) { reopenIssue(input: {issueId: $id}) { clientMutationId } }
@@ -532,6 +548,7 @@ enum GQL {
           assignees(first: 10) { nodes { id login name avatarUrl } }
           labels(first: 20) { nodes { id name color } }
           parent { id number title }
+          viewerCanDelete
           subIssuesSummary { total completed }
           comments { totalCount } }
         ... on PullRequest { id number title body state url createdAt updatedAt closedAt
@@ -649,6 +666,7 @@ struct ItemDTO: Decodable {
         var parent: Parent?
         var subIssuesSummary: SubSummary?
         var comments: Count?
+        var viewerCanDelete: Bool?
     }
 
     // Absent when the node id did not resolve to a project item.
@@ -693,7 +711,8 @@ struct ItemDTO: Decodable {
             subCompleted: content.subIssuesSummary?.completed ?? 0,
             commentCount: content.comments?.totalCount ?? 0,
             assignees: (content.assignees?.items ?? []).map(\.person),
-            labels: (content.labels?.items ?? []).map(\.label)
+            labels: (content.labels?.items ?? []).map(\.label),
+            viewerCanDelete: content.viewerCanDelete ?? false
         )
     }
 }

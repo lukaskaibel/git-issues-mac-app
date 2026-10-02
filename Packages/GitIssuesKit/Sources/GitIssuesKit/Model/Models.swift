@@ -115,6 +115,8 @@ public struct Item: Codable, FetchableRecord, PersistableRecord, Identifiable, H
     public var commentCount: Int = 0
     public var assignees: [Person] = []
     public var labels: [LabelRef] = []
+    /// Whether GitHub lets you delete this issue (it takes admin rights in the repository).
+    public var viewerCanDelete: Bool = false
 
     public var isLocalOnly: Bool { id.hasPrefix(LocalID.prefix) }
     public var isClosed: Bool { state != "OPEN" }

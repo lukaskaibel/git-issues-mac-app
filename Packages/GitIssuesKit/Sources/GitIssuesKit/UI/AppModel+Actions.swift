@@ -148,6 +148,39 @@ extension AppModel {
         return counts.max { $0.value < $1.value }?.key ?? available.first?.id
     }
 
+    // MARK: Deleting
+
+    /// Issues can be deleted with admin rights in their repository; drafts by anyone who can edit the board.
+    /// Pull requests can't be deleted on GitHub at all.
+    func canDelete(_ item: Item) -> Bool {
+        switch item.kind {
+        case .issue: item.viewerCanDelete || item.isLocalOnly
+        case .draft: project(of: item)?.viewerCanUpdate == true
+        case .pullRequest, .redacted: false
+        }
+    }
+
+    /// Asks for confirmation first; deleting on GitHub can't be undone.
+    func requestDelete(_ item: Item) {
+        guard canDelete(item) else { return }
+        deletionCandidate = item
+    }
+
+    func delete(_ item: Item) {
+        deletionCandidate = nil
+        if openItemId == item.id { closeDetail() }
+        if focusedItemId == item.id { focusedItemId = nil }
+        if hoveredItemId == item.id { hoveredItemId = nil }
+        history.removeAll { $0.itemId == item.id }
+        historyIndex = min(historyIndex, history.count - 1)
+        withAnimation(Theme.spring) {
+            perform([.deleteItem(.init(
+                itemId: item.id, projectId: item.projectId, contentId: item.contentId,
+                isDraft: item.kind == .draft, label: "\(item.displayNumber) \(item.title)"
+            ))])
+        }
+    }
+
     // MARK: Columns
 
     /// Saves a new set of status columns. Shown at once; rolled back if GitHub refuses.

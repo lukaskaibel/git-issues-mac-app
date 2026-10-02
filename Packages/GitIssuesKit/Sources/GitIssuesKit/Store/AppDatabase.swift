@@ -147,6 +147,14 @@ public final class AppDatabase: Sendable {
                 t.column("value", .text).notNull()
             }
         }
+        migrator.registerMigration("v2") { db in
+            try db.alter(table: "item") { t in
+                t.add(column: "viewerCanDelete", .boolean).notNull().defaults(to: false)
+            }
+            // Fetch every card again once, so the new field is filled in.
+            try db.execute(sql: "UPDATE item SET remoteUpdatedAt = NULL")
+            try db.execute(sql: "UPDATE project SET remoteUpdatedAt = NULL")
+        }
         return migrator
     }
 }

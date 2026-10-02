@@ -134,84 +134,22 @@ private struct DescriptionView: View {
     @Environment(AppModel.self) private var model
     var item: Item
 
-    @State private var editing = false
-    @State private var draft = ""
-    @State private var hovering = false
-    @FocusState private var focused: Bool
-
     var body: some View {
-        Group {
-            if editing {
-                editor
-            } else if item.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button(action: begin) {
-                    Text(item.isEditableContent ? "Add a description…" : "No description")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Theme.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(PlainPressStyle())
-                .disabled(!item.isEditableContent)
-            } else {
-                MarkdownText(text: item.body)
-                    .overlay(alignment: .topTrailing) {
-                        if item.isEditableContent {
-                            Button("Edit", action: begin)
-                                .buttonStyle(SecondaryButtonStyle())
-                                .background(Theme.panel)
-                                .opacity(hovering ? 1 : 0)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onHover { hovering = $0 }
-                    .onTapGesture(count: 2, perform: begin)
-                    .animation(Theme.quick, value: hovering)
-            }
-        }
+        MarkdownEditor(
+            text: item.body,
+            placeholder: item.isEditableContent ? "Add a description…" : "No description",
+            isEditable: item.isEditableContent,
+            onSave: save
+        )
+        .id(item.id)
     }
 
-    private var editor: some View {
-        VStack(alignment: .trailing, spacing: 10) {
-            TextEditor(text: $draft)
-                .font(.system(size: 14))
-                .lineSpacing(3)
-                .scrollContentBackground(.hidden)
-                .scrollIndicators(.never)
-                .focused($focused)
-                .frame(minHeight: 180, maxHeight: 460)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.groupHeader))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Theme.chipBorder, lineWidth: 1))
-                .onKeyPress(.escape) {
-                    editing = false
-                    return .handled
-                }
-            HStack(spacing: 8) {
-                Text("Markdown").font(.small).foregroundStyle(Theme.textTertiary)
-                Spacer()
-                Button("Cancel") { editing = false }
-                    .buttonStyle(SecondaryButtonStyle())
-                Button("Save") { save() }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .help("Save (⌘↵)")
-            }
-        }
-    }
-
-    private func begin() {
-        guard item.isEditableContent else { return }
-        draft = Diff3.normalize(item.body)
-        editing = true
-        focused = true
-    }
-
-    private func save() {
-        editing = false
+    private func save(_ text: String) {
+        // The latest copy, since the view may have been drawn before the last sync.
+        guard let current = model.allItems.first(where: { $0.id == item.id }) else { return }
         // Leave untouched text exactly as GitHub stores it, line endings included.
-        guard draft != Diff3.normalize(item.body) else { return }
-        model.setBody(item, to: draft)
+        guard text != Diff3.normalize(current.body) else { return }
+        model.setBody(current, to: text)
     }
 }
 

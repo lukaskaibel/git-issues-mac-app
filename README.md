@@ -137,6 +137,7 @@ Hover an issue or move to it with the arrow keys, then:
 | `⌘1` `⌘2` `⌘3` | Board, list, My Issues |
 | `⌘↵` | Save a description, send a comment, create the issue |
 | `⌘⇧C` / `⌘⇧O` | Copy the issue's GitHub link / open it on GitHub |
+| `⌘⌫` | Delete the issue (asks first; needs admin rights in the repository) |
 | `⌘R` | Sync with GitHub now |
 | `⌘,` | Settings: light, dark or system appearance, and the Dock icon |
 

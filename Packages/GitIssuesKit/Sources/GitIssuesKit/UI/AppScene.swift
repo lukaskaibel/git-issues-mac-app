@@ -65,6 +65,12 @@ public struct GitIssuesScene: Scene {
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(model.targetItem?.url == nil)
+                Divider()
+                // ⌘⌫ is handled by the key monitor, so it keeps deleting text inside text fields.
+                Button("Delete Issue…") {
+                    if let item = model.targetItem { model.requestDelete(item) }
+                }
+                .disabled(model.targetItem.map { !model.canDelete($0) } ?? true)
             }
         }
 

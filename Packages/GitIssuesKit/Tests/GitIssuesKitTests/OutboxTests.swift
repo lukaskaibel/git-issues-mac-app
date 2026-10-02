@@ -142,6 +142,73 @@ struct OutboxTests {
         #expect(untouched.theirs == nil)
     }
 
+    private func deletion(_ itemId: String, contentId: String?) -> Mutation {
+        .deleteItem(.init(itemId: itemId, projectId: Self.projectId, contentId: contentId, isDraft: false, label: "#1 Issue 1"))
+    }
+
+    @Test func deletingACardRemovesItAndDropsItsOtherChanges() throws {
+        let db = try makeDatabase()
+        try db.writer.write { db in
+            try Outbox.enqueue(db, setStatus(1, to: "doing", base: "todo"))
+            try Outbox.enqueue(db, setStatus(2, to: "done", base: "todo"))
+            try Outbox.enqueue(db, deletion("item-1", contentId: "issue-1"))
+        }
+        let entries = try db.reader.read { try OutboxEntry.order(Column("id")).fetchAll($0) }
+        #expect(try order(db) == [2, 3])
+        #expect(entries.count == 2)
+        #expect(entries.contains { if case .deleteItem = $0.mutation { true } else { false } })
+        #expect(!entries.contains { $0.mutation.itemId == "item-1" && $0.mutation.coalesceKey?.hasPrefix("field:") == true })
+    }
+
+    @Test func aDeletedCardStaysGoneWhenDataFromGitHubArrives() throws {
+        let db = try makeDatabase()
+        try db.writer.write { db in
+            try Outbox.enqueue(db, deletion("item-1", contentId: "issue-1"))
+            // GitHub hasn't processed the deletion yet and still lists the card.
+            try Self.item(1).save(db)
+            try Outbox.rebase(db)
+        }
+        #expect(try order(db) == [2, 3])
+    }
+
+    @Test func deletingANewIssueThatNeverReachedGitHubJustForgetsIt() throws {
+        let db = try makeDatabase()
+        let create = Mutation.CreateIssue(
+            itemId: "local-item", contentId: "local-issue", projectId: Self.projectId, repoId: "R1", repo: "octo/repo",
+            title: "Never sent", body: "", statusFieldId: Self.statusField, statusId: "todo",
+            assignees: [], labels: [], createdAt: Date()
+        )
+        try db.writer.write { db in
+            try Outbox.enqueue(db, .createIssue(create))
+            try Outbox.enqueue(db, deletion("local-item", contentId: "local-issue"))
+        }
+        #expect(try db.reader.read { try OutboxEntry.fetchCount($0) } == 0)
+        #expect(try db.reader.read { try Item.fetchOne($0, key: "local-item") } == nil)
+    }
+
+    @Test func deletingAnIssueCreatedMomentsAgoDeletesItOnGitHub() throws {
+        let db = try makeDatabase()
+        var create = Mutation.CreateIssue(
+            itemId: "local-item", contentId: "local-issue", projectId: Self.projectId, repoId: "R1", repo: "octo/repo",
+            title: "Half sent", body: "", statusFieldId: Self.statusField, statusId: "todo",
+            assignees: [], labels: [], createdAt: Date()
+        )
+        // GitHub has created the issue, but it isn't on the board yet.
+        create.createdContentId = "issue-99"
+        try db.writer.write { db in
+            try Outbox.enqueue(db, .createIssue(create))
+            try Outbox.enqueue(db, deletion("local-item", contentId: "local-issue"))
+        }
+        let entries = try db.reader.read { try OutboxEntry.fetchAll($0) }
+        #expect(entries.count == 1)
+        guard case .deleteItem(let m) = entries.first?.mutation else {
+            Issue.record("Expected a deletion")
+            return
+        }
+        #expect(m.contentId == "issue-99")
+        #expect(entries[0].mutation.referencedIds == ["issue-99"])
+    }
+
     @Test func keepingMineOrTakingTheirsSettlesAConflict() throws {
         let db = try makeDatabase()
         try db.writer.write { db in

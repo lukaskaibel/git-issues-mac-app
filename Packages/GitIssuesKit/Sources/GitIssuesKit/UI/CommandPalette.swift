@@ -244,6 +244,11 @@ private struct RootPalette: View {
                     model.overlay = .newIssue(statusId: nil, parentItemId: item.id)
                 })
             }
+            if model.canDelete(item) {
+                list.append(PaletteCommand(id: "delete", title: item.kind == .draft ? "Delete draft…" : "Delete issue…", section: section, icon: symbol("trash"), keys: ["⌘", "⌫"]) {
+                    model.requestDelete(item)
+                })
+            }
             if item.url != nil {
                 list.append(PaletteCommand(id: "copy", title: "Copy GitHub link", section: section, icon: symbol("link"), keys: ["⌘", "⇧", "C"]) {
                     model.copyLink(item)

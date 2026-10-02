@@ -134,6 +134,8 @@ extension AppModel {
     /// Returns true when the key was used.
     private func handle(_ event: NSEvent) -> Bool {
         guard signedIn else { return false }
+        // Alerts, the settings window and popovers handle their own keys.
+        if let key = NSApp.keyWindow, let mainWindow, key !== mainWindow { return false }
         let modifiers = event.modifierFlags.intersection([.command, .option, .control])
         let isEscape = event.keyCode == 53
 
@@ -162,6 +164,11 @@ extension AppModel {
             return false
         }
         if let responder = NSApp.keyWindow?.firstResponder, responder is NSTextView { return false }
+        // ⌘⌫ deletes the issue in focus, as in Linear. Inside a text field it keeps deleting text.
+        if modifiers == .command, event.keyCode == 51, let item = targetItem {
+            requestDelete(item)
+            return true
+        }
         guard modifiers.isEmpty else { return false }
 
         if isEscape {

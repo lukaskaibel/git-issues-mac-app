@@ -23,6 +23,25 @@ public struct RootView: View {
         .tint(Theme.accent)
         .animation(Theme.overlay, value: model.signedIn)
         .background(WindowReader { model.mainWindow = $0 })
+        .alert(
+            model.deletionCandidate.map { "Delete \($0.displayNumber)?" } ?? "Delete?",
+            isPresented: Binding(
+                get: { model.deletionCandidate != nil },
+                set: { if !$0 { model.deletionCandidate = nil } }
+            ),
+            presenting: model.deletionCandidate
+        ) { item in
+            // Return confirms, as in Linear; Escape cancels.
+            Button("Delete", role: .destructive) { model.delete(item) }
+                .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { model.deletionCandidate = nil }
+        } message: { item in
+            if item.kind == .draft {
+                Text("The draft “\(item.title)” is removed from the board.")
+            } else {
+                Text("“\(item.title)” and its comments are deleted on GitHub for everyone. This can't be undone.")
+            }
+        }
         .onChange(of: model.settingsRequest) {
             openSettings()
         }

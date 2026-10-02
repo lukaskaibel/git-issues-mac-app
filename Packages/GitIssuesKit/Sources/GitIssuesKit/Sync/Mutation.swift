@@ -14,6 +14,7 @@ public enum Mutation: Codable, Sendable, Equatable {
     case editLabels(EditLabels)
     case addComment(AddComment)
     case createIssue(CreateIssue)
+    case deleteItem(DeleteItem)
 
     public struct SetField: Codable, Sendable, Equatable {
         public var itemId: String
@@ -68,6 +69,16 @@ public enum Mutation: Codable, Sendable, Equatable {
         public var createdAt: Date
     }
 
+    public struct DeleteItem: Codable, Sendable, Equatable {
+        public var itemId: String
+        public var projectId: String
+        /// The issue behind the card; nil for a draft.
+        public var contentId: String?
+        public var isDraft: Bool
+        /// "#12 Title", for messages.
+        public var label: String
+    }
+
     public struct CreateIssue: Codable, Sendable, Equatable {
         public var itemId: String
         public var contentId: String
@@ -105,6 +116,7 @@ extension Mutation {
         case .setTitle(let m): "title:\(m.contentId)"
         case .setBody(let m): "body:\(m.contentId)"
         case .setState(let m): "state:\(m.contentId)"
+        case .deleteItem(let m): "delete:\(m.itemId)"
         default: nil
         }
     }
@@ -120,6 +132,8 @@ extension Mutation {
         case .editLabels(let m): [m.contentId]
         case .addComment(let m): [m.contentId]
         case .createIssue(let m): m.parentContentId.map { [$0] } ?? []
+        // An issue is deleted by its own id; only a draft needs the project item.
+        case .deleteItem(let m): m.isDraft ? [m.itemId] : (m.contentId.map { [$0] } ?? [m.itemId])
         }
     }
 
@@ -130,6 +144,7 @@ extension Mutation {
         case .move(let m): m.itemId
         case .setTitle(let m), .setBody(let m): m.itemId
         case .createIssue(let m): m.itemId
+        case .deleteItem(let m): m.itemId
         default: nil
         }
     }
@@ -142,6 +157,7 @@ extension Mutation {
         case .editLabels(let m): m.contentId
         case .addComment(let m): m.contentId
         case .createIssue(let m): m.contentId
+        case .deleteItem(let m): m.contentId
         default: nil
         }
     }
@@ -185,6 +201,10 @@ extension Mutation {
             m.contentId = r(m.contentId)
             m.parentContentId = r(m.parentContentId)
             return .createIssue(m)
+        case .deleteItem(var m):
+            m.itemId = r(m.itemId)
+            m.contentId = r(m.contentId)
+            return .deleteItem(m)
         }
     }
 }
@@ -269,6 +289,14 @@ extension Mutation {
                 authorAvatarUrl: m.author.avatarUrl, body: m.body, createdAt: m.createdAt
             ).insert(db)
 
+        case .deleteItem(let m):
+            try Item.deleteOne(db, key: m.itemId)
+            if let contentId = m.contentId {
+                try db.execute(sql: "DELETE FROM item WHERE contentId = ? AND projectId = ?", arguments: [contentId, m.projectId])
+                try db.execute(sql: "DELETE FROM subIssue WHERE id = ?", arguments: [contentId])
+                try db.execute(sql: "DELETE FROM comment WHERE issueId = ?", arguments: [contentId])
+            }
+
         case .createIssue(let m):
             guard try !Item.exists(db, key: m.itemId) else { return }
             let last = try Double.fetchOne(db, sql: "SELECT MAX(position) FROM item WHERE projectId = ?", arguments: [m.projectId])
@@ -337,6 +365,7 @@ extension Mutation {
         case .editLabels(let m): return (try number(contentId: m.contentId), "Labels changed")
         case .addComment(let m): return (try number(contentId: m.contentId), "Comment added")
         case .createIssue(let m): return ("New", "Issue created: \(m.title)")
+        case .deleteItem(let m): return (m.label.components(separatedBy: " ").first ?? "", "Deleted")
         }
     }
 }
@@ -379,6 +408,10 @@ public enum Outbox {
 
     /// Records a mutation and applies it locally, folding it into an unsent one for the same field if there is one.
     public static func enqueue(_ db: Database, _ mutation: Mutation) throws {
+        if case .deleteItem(let deletion) = mutation {
+            try enqueueDeletion(db, deletion)
+            return
+        }
         var mutation = mutation
         if let key = mutation.coalesceKey {
             let previous = try OutboxEntry
@@ -391,6 +424,33 @@ public enum Outbox {
             }
         }
         try mutation.applyLocally(db)
+        var entry = OutboxEntry(createdAt: Date(), state: .pending, mutation: mutation)
+        try entry.insert(db)
+    }
+
+    /// Other changes to a deleted card are pointless, so they are dropped, sent or not (a sent one would
+    /// otherwise be re-applied for a while and bring the card back). A card that never reached GitHub is
+    /// simply forgotten.
+    private static func enqueueDeletion(_ db: Database, _ deletion: Mutation.DeleteItem) throws {
+        var deletion = deletion
+        var neverCreated = false
+        for entry in try active(db) {
+            let mutation = entry.mutation
+            let related = mutation.itemId == deletion.itemId
+                || (deletion.contentId != nil && mutation.contentId == deletion.contentId)
+            guard related else { continue }
+            if case .createIssue(let create) = mutation {
+                if let created = create.createdContentId {
+                    deletion.contentId = created
+                } else {
+                    neverCreated = true
+                }
+            }
+            try entry.delete(db)
+        }
+        let mutation = Mutation.deleteItem(deletion)
+        try mutation.applyLocally(db)
+        guard !neverCreated else { return }
         var entry = OutboxEntry(createdAt: Date(), state: .pending, mutation: mutation)
         try entry.insert(db)
     }

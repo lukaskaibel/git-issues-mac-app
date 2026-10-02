@@ -768,6 +768,16 @@ struct ItemMenuBuilder {
             menu.addItem(ClosureMenuItem("Copy Link") { [model, item] in model.copyLink(item) })
             menu.addItem(ClosureMenuItem("Open on GitHub") { [model, item] in model.openOnGitHub(item) })
         }
+        if item.kind == .issue || item.kind == .draft {
+            menu.addItem(.separator())
+            let delete = ClosureMenuItem(item.kind == .draft ? "Delete Draft…" : "Delete Issue…") { [model, item] in
+                model.requestDelete(item)
+            }
+            delete.isEnabled = model.canDelete(item)
+            menu.addItem(delete)
+        }
+        // Keep the enabled state set above instead of AppKit's automatic one.
+        menu.autoenablesItems = false
         return menu
     }
 

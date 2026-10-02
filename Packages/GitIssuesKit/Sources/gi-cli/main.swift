@@ -44,7 +44,7 @@ func printBoard(_ db: AppDatabase, projectId: String) throws {
             let priority = priorities.first { $0.id == item.priorityId }?.name ?? "-"
             let labels = item.labels.map(\.name).joined(separator: ",")
             let sub = item.subTotal > 0 ? " [\(item.subCompleted)/\(item.subTotal)]" : ""
-            return "    \(item.displayNumber) \(item.title) (\(priority); \(labels); \(item.assignees.map(\.login).joined(separator: ",")))\(sub) \(item.state)"
+            return "    \(item.displayNumber) \(item.title) (\(priority); \(labels); \(item.assignees.map(\.login).joined(separator: ",")))\(sub) \(item.state)\(item.viewerCanDelete ? " deletable" : "")"
         }
         for option in options {
             let cards = items.filter { $0.statusId == option.id }
@@ -83,6 +83,18 @@ func run() async throws {
         let again = Date()
         try await engine.pull(projectId: project.id)
         print("Second pull (nothing changed) took \(String(format: "%.2f", Date().timeIntervalSince(again)))s")
+
+    case "inspect":
+        // Opens a database file (running any pending migrations) and reports what is in it.
+        guard args.count > 1 else { throw CLIError("Usage: gi-cli inspect <db path>") }
+        let db = try AppDatabase.onDisk(at: URL(fileURLWithPath: args[1]))
+        try await db.reader.read { db in
+            let columns = try db.columns(in: "item").map(\.name)
+            print("item columns include viewerCanDelete:", columns.contains("viewerCanDelete"))
+            print("projects:", try Project.fetchCount(db), "items:", try Item.fetchCount(db))
+            print("items waiting to be fetched again:", try Item.filter(Column("remoteUpdatedAt") == nil).fetchCount(db))
+            print("queued changes:", try OutboxEntry.fetchCount(db))
+        }
 
     case "selftest":
         try await SelfTest.run()

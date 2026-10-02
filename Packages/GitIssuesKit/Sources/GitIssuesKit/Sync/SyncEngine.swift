@@ -572,6 +572,17 @@ public actor SyncEngine {
                 try await api.setFieldValue(projectId: m.projectId, itemId: itemId, fieldId: fieldId, optionId: optionId)
             }
             return .sent([m.itemId: itemId, m.contentId: contentId])
+
+        case .deleteItem(let m):
+            do {
+                if m.isDraft {
+                    try await api.deleteProjectItem(projectId: m.projectId, itemId: m.itemId)
+                } else if let contentId = m.contentId {
+                    try await api.deleteIssue(contentId: contentId)
+                }
+            } catch let error as APIError where error.isNotFound {
+                // Already gone, which is what was asked for.
+            }
         }
         return .sent([:])
     }
@@ -628,6 +639,9 @@ public actor SyncEngine {
         }
         if case .addComment(let m) = entry.mutation {
             try Comment.deleteOne(db, key: m.commentId)
+        }
+        if case .deleteItem(let m) = entry.mutation {
+            return Notice(title: "\(m.label) couldn't be deleted", message: error.localizedDescription, isWarning: true)
         }
         let gone = (error as? APIError)?.isNotFound ?? false
         return Notice(
