@@ -21,6 +21,9 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- The command palette, its pickers and the new-issue dialog reliably take keyboard focus when they open, so you
+  can type straight away. Before, SwiftUI sometimes dropped the focus request and left nothing focused.
+- Escape closes the command palette and the new-issue dialog whatever has focus inside them.
 - Typing straight after pressing C (or ⌘N, or ⌘K) no longer loses the first letters: keys pressed before the
   title field has focus are held and handed to it. If anything takes focus away while the new-issue dialog
   appears, the title gets it back.

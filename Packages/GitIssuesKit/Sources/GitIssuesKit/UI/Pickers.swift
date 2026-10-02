@@ -33,6 +33,7 @@ struct PickerList: View {
                 .textFieldStyle(.plain)
                 .font(fieldFont)
                 .focused($focused)
+                .focusOnAppear()
                 .padding(.horizontal, 12)
                 .frame(height: 36)
                 .onKeyPress(.downArrow) {

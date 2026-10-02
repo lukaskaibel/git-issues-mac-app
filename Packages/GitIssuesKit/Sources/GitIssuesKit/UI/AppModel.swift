@@ -122,6 +122,8 @@ public final class AppModel {
     @ObservationIgnored var overlayOpenedAt: Date?
     @ObservationIgnored var heldKeys: [NSEvent] = []
     @ObservationIgnored var heldKeysTimer: Timer?
+    /// The app's main window, to tell it apart from popovers and the settings window.
+    @ObservationIgnored weak var mainWindow: NSWindow?
     /// Set while a board drag is in progress so keyboard shortcuts stay out of the way.
     var isDragging = false
     /// Bumped when Escape is pressed during a drag.

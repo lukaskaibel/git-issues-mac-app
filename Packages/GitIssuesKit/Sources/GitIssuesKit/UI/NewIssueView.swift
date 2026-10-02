@@ -42,6 +42,7 @@ struct NewIssueView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 18, weight: .semibold))
                     .focused($focus, equals: .title)
+                    .focusOnAppear()
                     .onSubmit { focus = .body }
 
                 ZStack(alignment: .topLeading) {

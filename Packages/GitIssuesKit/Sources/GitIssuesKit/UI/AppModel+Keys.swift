@@ -144,6 +144,12 @@ extension AppModel {
             }
             return false
         }
+        // Escape always closes the palette or dialog, whatever has focus inside it. A popover of the dialog
+        // (a picker) is a window of its own and closes itself first.
+        if isEscape, overlay != nil, NSApp.keyWindow == nil || NSApp.keyWindow === mainWindow {
+            overlay = nil
+            return true
+        }
         // Overlays and text fields handle their own keys. A dialog's text field only takes focus once the
         // dialog is on screen, so typing that starts right away is held and handed over when it can land.
         if overlay != nil {

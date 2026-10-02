@@ -22,6 +22,7 @@ public struct RootView: View {
         .foregroundStyle(Theme.text)
         .tint(Theme.accent)
         .animation(Theme.overlay, value: model.signedIn)
+        .background(WindowReader { model.mainWindow = $0 })
         .onChange(of: model.settingsRequest) {
             openSettings()
         }

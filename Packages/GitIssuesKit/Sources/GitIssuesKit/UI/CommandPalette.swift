@@ -102,6 +102,7 @@ private struct RootPalette: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .focused($focused)
+                .focusOnAppear()
                 .padding(.horizontal, 16)
                 .frame(height: 48)
                 .onKeyPress(.downArrow) {
