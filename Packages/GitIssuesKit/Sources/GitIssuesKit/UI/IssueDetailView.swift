@@ -270,6 +270,7 @@ private struct SubIssuesSection: View {
 
     var body: some View {
         let subs = model.subIssues
+        let showsPriority = model.project(of: item)?.priorityFieldId != nil
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
                 Text("Sub-issues").font(.uiSemibold)
@@ -293,7 +294,7 @@ private struct SubIssuesSection: View {
             if !subs.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(subs.enumerated()), id: \.element.id) { index, sub in
-                        SubIssueRow(sub: sub)
+                        SubIssueRow(sub: sub, showsPriority: showsPriority)
                         if index < subs.count - 1 {
                             Rectangle().fill(Theme.panelBorder).frame(height: 1)
                         }
@@ -310,11 +311,29 @@ private struct SubIssuesSection: View {
 private struct SubIssueRow: View {
     @Environment(AppModel.self) private var model
     var sub: SubIssue
+    var showsPriority: Bool
     @State private var hovering = false
 
     var body: some View {
         let boardItem = model.item(contentId: sub.id)
+        // Same order as a list row: priority, number, status, title.
         HStack(spacing: 10) {
+            if showsPriority {
+                Group {
+                    if let boardItem {
+                        PriorityIcon(level: model.priorityLevel(of: boardItem))
+                    } else {
+                        // Priority is a field of the project, so a sub-issue that isn't on the board has none.
+                        Color.clear
+                    }
+                }
+                .frame(width: 14, height: 12)
+            }
+            Text(sub.number > 0 ? "#\(sub.number)" : "New")
+                .font(.small)
+                .monospacedDigit()
+                .foregroundStyle(Theme.textTertiary)
+                .frame(width: 36, alignment: .leading)
             Button {
                 withAnimation(Theme.spring) { model.setClosed(sub, !sub.isClosed) }
             } label: {
@@ -324,11 +343,6 @@ private struct SubIssueRow: View {
             .help(sub.isClosed ? "Reopen" : "Mark as done")
             .accessibilityLabel(sub.isClosed ? "Reopen sub-issue" : "Mark sub-issue as done")
 
-            Text(sub.number > 0 ? "#\(sub.number)" : "New")
-                .font(.small)
-                .monospacedDigit()
-                .foregroundStyle(Theme.textTertiary)
-                .frame(width: 36, alignment: .leading)
             Text(sub.title)
                 .foregroundStyle(sub.isClosed ? Theme.textSecondary : Theme.text)
                 .lineLimit(1)
@@ -353,6 +367,23 @@ private struct SubIssueRow: View {
                 model.open(boardItem)
             } else if let url = sub.url.flatMap(URL.init(string:)) {
                 NSWorkspace.shared.open(url)
+            }
+        }
+        .contextMenu {
+            if let boardItem {
+                // The same menu as a card on the board.
+                ItemContextMenu(item: boardItem)
+            } else {
+                Button(sub.isClosed ? "Reopen" : "Mark as Done") {
+                    withAnimation(Theme.spring) { model.setClosed(sub, !sub.isClosed) }
+                }
+                if let url = sub.url {
+                    Divider()
+                    Button("Copy Link") { model.copyLink(url, for: "#\(sub.number) \(sub.title)") }
+                    Button("Open on GitHub") {
+                        if let parsed = URL(string: url) { NSWorkspace.shared.open(parsed) }
+                    }
+                }
             }
         }
     }

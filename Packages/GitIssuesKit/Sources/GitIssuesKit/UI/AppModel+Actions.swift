@@ -231,9 +231,13 @@ extension AppModel {
 
     func copyLink(_ item: Item) {
         guard let url = item.url else { return }
+        copyLink(url, for: "\(item.displayNumber) \(item.title)")
+    }
+
+    func copyLink(_ url: String, for label: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url, forType: .string)
-        status.post(Notice(title: "Link copied", message: "\(item.displayNumber) \(item.title)"))
+        status.post(Notice(title: "Link copied", message: label))
     }
 
     func apply(_ action: Notice.Action) {

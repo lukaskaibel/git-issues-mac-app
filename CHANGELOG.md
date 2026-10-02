@@ -6,6 +6,13 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Right-clicking a sub-issue opens the same menu as a card on the board (status, priority, assign to me, copy link,
+  open on GitHub). Sub-issues that aren't on the board offer what applies to them: mark as done or reopen, and the
+  links.
+- Sub-issue rows show their priority, in the same order as list rows.
+
 ### Changed
 
 - Clicking the account at the top of the sidebar opens a menu with Sync Now, Appearance, Settings and Sign Out.
