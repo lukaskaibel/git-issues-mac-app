@@ -36,6 +36,11 @@ enum AppearanceSetting: String, CaseIterable, Identifiable {
 /// The icons the app can wear in the Dock: four designs, each on a light and on a dark plate.
 /// The first one is also the icon of the app bundle.
 enum AppIconChoice: String, CaseIterable, Identifiable {
+    /// The app's own icon, which follows the system's light or dark appearance.
+    case card = "a"
+    case cardLight = "a-light"
+    case cardDark = "a-dark"
+    case cardViolet = "a-violet"
     case boardLight = "e"
     case colourLight = "g"
     case barsLight = "i"
@@ -45,14 +50,21 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
     case barsDark = "i-dark"
     case checklistDark = "j-dark"
 
+    static let cards: [AppIconChoice] = [.card, .cardLight, .cardDark, .cardViolet]
     static let light: [AppIconChoice] = [.boardLight, .colourLight, .barsLight, .checklistLight]
     static let dark: [AppIconChoice] = [.boardDark, .colourDark, .barsDark, .checklistDark]
-    static let standard = AppIconChoice.boardLight
+    static let standard = AppIconChoice.card
+    /// A new key with the card icon, so everyone starts from it once rather than keeping an older pick.
+    static let defaultsKey = "dockIcon"
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .card: "Card, light or dark with the system"
+        case .cardLight: "Card, light"
+        case .cardDark: "Card, dark"
+        case .cardViolet: "Card on violet"
         case .boardLight: "Board"
         case .boardDark: "Board, dark"
         case .colourLight: "Board on colour"
@@ -66,6 +78,10 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
 
     private var resource: String {
         switch self {
+        case .card: "icon-A-auto"
+        case .cardLight: "icon-A-light"
+        case .cardDark: "icon-A-dark"
+        case .cardViolet: "icon-A-violet"
         case .boardLight: "icon-E"
         case .boardDark: "icon-F"
         case .colourLight: "icon-G"

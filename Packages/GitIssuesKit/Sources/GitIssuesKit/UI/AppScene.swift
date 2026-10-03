@@ -94,9 +94,10 @@ struct SettingsView: View {
 
             LabeledContent("App icon") {
                 VStack(alignment: .trailing, spacing: 8) {
+                    iconRow(AppIconChoice.cards)
                     iconRow(AppIconChoice.light)
                     iconRow(AppIconChoice.dark)
-                    Text("Shown in the Dock while the app is open.")
+                    Text("The first one follows light and dark mode. Others show in the Dock while the app is open.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

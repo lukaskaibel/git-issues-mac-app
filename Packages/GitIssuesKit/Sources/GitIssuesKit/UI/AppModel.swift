@@ -98,7 +98,7 @@ public final class AppModel {
     /// Which icon the app shows in the Dock while it is running.
     var appIcon: AppIconChoice {
         didSet {
-            UserDefaults.standard.set(appIcon.rawValue, forKey: "appIcon")
+            UserDefaults.standard.set(appIcon.rawValue, forKey: AppIconChoice.defaultsKey)
             appIcon.apply()
         }
     }
@@ -154,7 +154,7 @@ public final class AppModel {
         signedIn = auth.isSignedIn
         viewMode = ViewMode(rawValue: UserDefaults.standard.string(forKey: "viewMode") ?? "") ?? .board
         appearance = AppearanceSetting(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system
-        appIcon = AppIconChoice(rawValue: UserDefaults.standard.string(forKey: "appIcon") ?? "") ?? .standard
+        appIcon = AppIconChoice(rawValue: UserDefaults.standard.string(forKey: AppIconChoice.defaultsKey) ?? "") ?? .standard
         appearance.apply()
         appIcon.apply()
         startObserving()

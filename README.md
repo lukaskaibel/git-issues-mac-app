@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="Design/icon.png" width="128" height="128" alt="Git Issues app icon">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="Design/icon-dark.png">
+    <img src="Design/icon.png" width="128" height="128" alt="Git Issues app icon">
+  </picture>
 </p>
 
 <h1 align="center">Git Issues</h1>
@@ -139,7 +142,7 @@ Hover an issue or move to it with the arrow keys, then:
 | `⌘⇧C` / `⌘⇧O` | Copy the issue's GitHub link / open it on GitHub |
 | `⌘⌫` | Delete the issue (asks first; needs admin rights in the repository) |
 | `⌘R` | Sync with GitHub now |
-| `⌘,` | Settings: light, dark or system appearance, and the Dock icon |
+| `⌘,` | Settings: light, dark or system appearance, and the app icon |
 
 Click an issue's priority, status, labels, assignees or sub-issue count to change it in place, or right-click
 it for everything at once. In the list, click a section header to fold it.
@@ -171,8 +174,8 @@ Packages/GitIssuesKit/
   Sources/gi-cli/            Command-line tool for exercising sync without the UI
   Tests/                     Unit tests
 Config/                      Build settings and Info.plist
-Design/                      Icon variants and screenshots
-Tools/                       make-icons.swift draws the icons; set-icon.sh installs one as the app icon
+Design/                      The violet icon, earlier icon variants, screenshots
+Tools/                       make-card-icon.swift draws the app icon; render-icons.sh renders its PNG copies
 ```
 
 Run the unit tests:

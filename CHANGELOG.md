@@ -31,6 +31,9 @@ All notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- New app icon: a card lifted off a board, in the accent colour. It's an Icon Composer icon, so it follows light and
+  dark mode by itself (and the tinted and clear styles). Settings offers it fixed in light or dark, and on violet;
+  the earlier designs are still there. Everyone starts from the new icon once, even after picking another before.
 - Clicking the account at the top of the sidebar opens a menu with Sync Now, Appearance, Settings and Sign Out.
   The separate "…" button next to the sync status is gone.
 - The sync status sits lower, lines up with the sidebar's icons, and shows a capsule on hover.
