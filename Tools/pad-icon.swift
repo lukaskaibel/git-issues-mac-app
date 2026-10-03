@@ -28,12 +28,8 @@ if arguments.first == "--split" {
     write({ context in
         let full = CGRect(x: 0, y: 0, width: canvas, height: canvas)
         context.draw(light, in: full)
-        // The lower right half in dark, split along the diagonal.
-        context.move(to: CGPoint(x: canvas, y: canvas))
-        context.addLine(to: CGPoint(x: canvas, y: 0))
-        context.addLine(to: CGPoint(x: 0, y: 0))
-        context.closePath()
-        context.clip()
+        // The right half in dark, as System Settings shows its automatic appearance.
+        context.clip(to: CGRect(x: canvas / 2, y: 0, width: canvas / 2, height: canvas))
         context.draw(dark, in: full)
     }, to: arguments[3])
 } else {
