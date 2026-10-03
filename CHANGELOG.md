@@ -73,5 +73,5 @@ First public version.
 - Light and dark appearance, or following the system, and a choice of Dock icons.
 - Sign-in with the GitHub CLI, a personal access token, or the OAuth device flow.
 
-[Unreleased]: https://github.com/lukaskaibel/git-issues-mac-app/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/lukaskaibel/git-issues-mac-app/releases/tag/v0.1.0
+[Unreleased]: https://github.com/lukaskaibel/issues-for-github/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/lukaskaibel/issues-for-github/releases/tag/v0.1.0

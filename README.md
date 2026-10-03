@@ -93,8 +93,8 @@ When you and someone else change the same issue:
 ### Build and run
 
 ```bash
-git clone https://github.com/lukaskaibel/git-issues-mac-app.git
-cd git-issues-mac-app
+git clone https://github.com/lukaskaibel/issues-for-github.git
+cd issues-for-github
 open GitIssues.xcodeproj
 ```
 
