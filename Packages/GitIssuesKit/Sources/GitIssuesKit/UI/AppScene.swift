@@ -8,7 +8,7 @@ public struct GitIssuesScene: Scene {
     public init() {}
 
     public var body: some Scene {
-        Window("Git Issues", id: "main") {
+        Window("Issues", id: "main") {
             RootView()
                 .environment(model)
         }

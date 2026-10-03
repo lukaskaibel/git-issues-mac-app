@@ -31,6 +31,8 @@ All notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- The app is called Issues now; "Git Issues" was a working title. Data, settings and sign-in carry over, and the
+  built app is `Issues.app`.
 - New app icon: a card lifted off a board, in the accent colour. It's an Icon Composer icon, so it follows light and
   dark mode by itself (and the tinted and clear styles). Settings offers it fixed in light or dark, and on violet;
   the earlier designs are still there. Everyone starts from the new icon once, even after picking another before.

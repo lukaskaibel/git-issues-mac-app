@@ -1,11 +1,11 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="Design/icon-dark.png">
-    <img src="Design/icon.png" width="128" height="128" alt="Git Issues app icon">
+    <img src="Design/icon.png" width="128" height="128" alt="Issues app icon">
   </picture>
 </p>
 
-<h1 align="center">Git Issues</h1>
+<h1 align="center">Issues</h1>
 
 <p align="center">
   A fast, native Mac app for GitHub Issues, with the board, keyboard flow and polish of Linear.<br>
@@ -24,12 +24,11 @@
 
 > **Status: early.** Version 0.1.0 covers the daily work of moving, editing and creating issues.
 > There are no downloadable builds yet; you build it from source (five minutes, see below).
-> "Git Issues" is a working title.
 
 ## Why
 
 GitHub Issues holds the data most teams already have. Its interface is slow to drive: every status change is a
-page load and a menu. Git Issues puts a native, keyboard-first front end on the same data. It reads and writes
+page load and a menu. This app puts a native, keyboard-first front end on the same data. It reads and writes
 GitHub Projects, issues, sub-issues, labels, assignees and comments, and stores nothing anywhere else.
 
 ## What it does
@@ -201,7 +200,7 @@ Built with [GRDB](https://github.com/groue/GRDB.swift) and
 [MarkdownUI](https://github.com/gonzalezreal/swift-markdown-ui). The interaction design is inspired by
 [Linear](https://linear.app).
 
-Git Issues is an independent project and is not affiliated with, endorsed by, or sponsored by GitHub or Linear.
+Issues is an independent project and is not affiliated with, endorsed by, or sponsored by GitHub or Linear.
 
 ## License
 
