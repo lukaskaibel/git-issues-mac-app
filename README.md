@@ -141,6 +141,9 @@ Hover an issue or move to it with the arrow keys, then:
 | `⌘R` | Sync with GitHub now |
 | `⌘,` | Settings: light, dark or system appearance, and the Dock icon |
 
+Click an issue's priority, status, labels, assignees or sub-issue count to change it in place, or right-click
+it for everything at once. In the list, click a section header to fold it.
+
 On the board, drag cards between and within columns; press `Esc` mid-drag to put a card back. Drag a column by its
 header to reorder it, hover the header for its menu (rename, colour, delete), and use **Add column** at the right
 end of the board.

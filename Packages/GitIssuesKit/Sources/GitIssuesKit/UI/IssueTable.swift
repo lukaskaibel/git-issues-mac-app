@@ -6,12 +6,16 @@ struct IssueRowModel: Equatable {
     var item: Item
     var glyph: StatusGlyph
     var priority: PriorityLevel
+    /// Whether the project has the field, so the icon can be clicked to change it.
+    var showsPriority = true
+    var showsStatus = true
     /// Shown in "My Issues", where rows come from several projects.
     var projectTitle: String?
 }
 
 struct IssueSectionModel: Equatable {
     var id: String
+    var collapsed = false
     var title: String
     var glyph: StatusGlyph
     var optionId: String?
@@ -48,7 +52,7 @@ struct IssueTable: NSViewRepresentable {
         table.backgroundColor = .clear
         table.selectionHighlightStyle = .none
         table.gridStyleMask = []
-        table.floatsGroupRows = true
+        table.floatsGroupRows = false
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.allowsColumnResizing = false
         table.dataSource = context.coordinator
@@ -69,12 +73,18 @@ struct IssueTable: NSViewRepresentable {
         scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         scroll.automaticallyAdjustsContentInsets = false
-        scroll.contentInsets = NSEdgeInsets(top: 6, left: 0, bottom: 40, right: 0)
+        // No top inset: the list ends cleanly at the top edge, under the sticky header.
+        scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 40, right: 0)
         scroll.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
             context.coordinator, selector: #selector(Coordinator.scrolled(_:)),
             name: NSView.boundsDidChangeNotification, object: scroll.contentView
         )
+        let sticky = IssueHeaderCell()
+        sticky.isHidden = true
+        scroll.addSubview(sticky)
+        context.coordinator.sticky = sticky
+        context.coordinator.scrollView = scroll
         return scroll
     }
 
@@ -102,6 +112,10 @@ struct IssueTable: NSViewRepresentable {
 
         let model: AppModel
         weak var table: HoverTableView?
+        weak var scrollView: NSScrollView?
+        /// The header of the section the list is scrolled into, held at the top while its own row is out of view.
+        weak var sticky: IssueHeaderCell?
+        private var stickySectionId: String?
         private var entries: [Entry] = []
         private var focusedId: String?
         private var hoveredId: String?
@@ -133,7 +147,7 @@ struct IssueTable: NSViewRepresentable {
                 }
             } else {
                 let difference = newIds.difference(from: oldIds)
-                if old.isEmpty || difference.count > 40 {
+                if old.isEmpty || difference.count > 300 {
                     table.reloadData()
                 } else {
                     // Rows slide to their new place when an issue changes status or order.
@@ -157,6 +171,7 @@ struct IssueTable: NSViewRepresentable {
                     table.view(atColumn: 0, row: row, makeIfNecessary: false)?.needsDisplay = true
                 }
             }
+            updateSticky()
             if focusedId != self.focusedId {
                 let previous = self.focusedId
                 self.focusedId = focusedId
@@ -296,8 +311,77 @@ struct IssueTable: NSViewRepresentable {
             return model.item
         }
 
+        // MARK: Sticky header and collapsing
+
+        /// Places the sticky header over the top of the list. It shows only while the current section's own
+        /// header has scrolled out of view, and the next header pushes it up as it arrives.
+        func updateSticky() {
+            guard let table, let scrollView, let sticky else { return }
+            let height = Theme.rowHeight
+            let top = scrollView.contentView.bounds.minY
+            var current: (row: Int, section: IssueSectionModel)?
+            var next: Int?
+            for (row, entry) in entries.enumerated() {
+                guard case .header(let section) = entry else { continue }
+                if table.rect(ofRow: row).minY <= top + 0.5 {
+                    current = (row, section)
+                } else {
+                    next = row
+                    break
+                }
+            }
+            guard let current, table.rect(ofRow: current.row).minY < top - 0.5 else {
+                sticky.isHidden = true
+                stickySectionId = nil
+                return
+            }
+            var offset: CGFloat = 0
+            if let next {
+                let gap = table.rect(ofRow: next).minY - top
+                if gap < height { offset = gap - height }
+            }
+            sticky.configure(current.section, model: model)
+            stickySectionId = current.section.id
+            // NSScrollView isn't flipped: its top edge is at maxY.
+            sticky.frame = NSRect(x: 0, y: scrollView.bounds.height - height - offset, width: scrollView.bounds.width, height: height)
+            sticky.isHidden = false
+        }
+
+        #if DEBUG
+        var listSummary: String {
+            let rows = entries.map { entry -> String in
+                switch entry {
+                case .header(let section): "[\(section.title)\(section.collapsed ? " folded" : "")]"
+                case .row(let row): row.item.displayNumber
+                }
+            }
+            let shown = sticky.map { !$0.isHidden } ?? false
+            let place = "\(stickySectionId ?? "?") y=\(Int(sticky?.frame.minY ?? 0))"
+            return "sticky=" + (shown ? place : "hidden") + " rows=" + rows.joined(separator: " ")
+        }
+        #endif
+
         @objc func clicked(_ sender: NSTableView) {
-            if let item = item(at: sender.clickedRow) { model.open(item) }
+            let row = sender.clickedRow
+            guard let item = item(at: row) else { return }
+            if let event = NSApp.currentEvent,
+               let cell = sender.view(atColumn: 0, row: row, makeIfNecessary: false) as? IssueRowCell,
+               let part = cell.part(at: cell.convert(event.locationInWindow, from: nil)) {
+                Dropdown.show(below: part.rect, in: cell, model: model) { close in
+                    ItemPicker(kind: part.kind, itemId: item.id, close: close)
+                }
+                return
+            }
+            model.open(item)
+        }
+
+        /// Highlights the part under the pointer, so it reads as clickable.
+        func hoverPart(row: Int, pointInTable point: NSPoint) {
+            guard let table else { return }
+            for visible in visibleRows(in: table) {
+                guard let cell = table.view(atColumn: 0, row: visible, makeIfNecessary: false) as? IssueRowCell else { continue }
+                cell.hoveredPart = visible == row ? cell.part(at: cell.convert(point, from: table))?.kind : nil
+            }
         }
 
         func hover(row: Int) {
@@ -312,6 +396,7 @@ struct IssueTable: NSViewRepresentable {
 
         /// Keeps the highlight under the pointer while the list scrolls beneath it.
         @objc func scrolled(_ notification: Notification) {
+            updateSticky()
             table?.updateHoverFromCurrentMouseLocation()
         }
 
@@ -342,11 +427,14 @@ final class HoverTableView: NSTableView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        coordinator?.hover(row: row(at: convert(event.locationInWindow, from: nil)))
+        let point = convert(event.locationInWindow, from: nil)
+        coordinator?.hover(row: row(at: point))
+        coordinator?.hoverPart(row: row(at: point), pointInTable: point)
     }
 
     override func mouseExited(with event: NSEvent) {
         coordinator?.hover(row: -1)
+        coordinator?.hoverPart(row: -1, pointInTable: .zero)
     }
 
     func updateHoverFromCurrentMouseLocation() {
@@ -390,6 +478,16 @@ final class IssueRowCell: NSView {
     private var dateSize = NSSize.zero
     private var projectSize = NSSize.zero
     private var subCountSize = NSSize.zero
+    /// Where the clickable parts were drawn last, in this cell's coordinates.
+    private(set) var parts: [(kind: PickerKind, rect: NSRect)] = []
+    /// The part under the pointer, which gets a soft highlight like a button.
+    var hoveredPart: PickerKind? {
+        didSet { if hoveredPart != oldValue { needsDisplay = true } }
+    }
+
+    func part(at point: NSPoint) -> (kind: PickerKind, rect: NSRect)? {
+        parts.first { $0.rect.insetBy(dx: -3, dy: -4).contains(point) }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -471,19 +569,32 @@ final class IssueRowCell: NSView {
             NSColor(Theme.selected).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: IssueTable.inset, dy: 1), xRadius: 7, yRadius: 7).fill()
         }
+        if let hoveredPart, let rect = parts.first(where: { $0.kind == hoveredPart })?.rect {
+            NSColor(Theme.controlActive).setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: -4, dy: -4), xRadius: 6, yRadius: 6).fill()
+        }
+        var parts: [(kind: PickerKind, rect: NSRect)] = []
+        let canEditFields = row.item.kind != .draft
 
         // Left to right: priority, number, status.
         var x: CGFloat = IssueTable.inset + 14
         drawPriority(row.priority, x: x, midY: midY)
+        if row.showsPriority { parts.append((.priority, NSRect(x: x, y: midY - 7, width: 14, height: 14))) }
         x += 14 + 10
         number.draw(at: NSPoint(x: x, y: midY - numberSize.height / 2))
         x += 40 + 10
         StatusPainter.draw(row.glyph, in: CGRect(x: x, y: midY - 7, width: 14, height: 14), cg: context)
+        if row.showsStatus { parts.append((.status, NSRect(x: x, y: midY - 7, width: 14, height: 14))) }
         x += 14 + 10
 
         // Right to left: assignees, date, project, labels.
         var right = size.width - IssueTable.inset - 14
         drawAvatars(row.item.assignees, rightEdge: right, midY: midY, context: context)
+        if canEditFields {
+            let count = CGFloat(max(min(row.item.assignees.count, 3), 1))
+            let width = 18 + (count - 1) * 13
+            parts.append((.assignees, NSRect(x: right - width, y: midY - 9, width: width, height: 18)))
+        }
         right -= 30 + 10
         date.draw(at: NSPoint(x: right - dateSize.width, y: midY - dateSize.height / 2))
         right -= 52 + 10
@@ -492,11 +603,13 @@ final class IssueRowCell: NSView {
             project.draw(with: NSRect(x: right - width, y: midY - projectSize.height / 2, width: width, height: projectSize.height), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
             right -= width + 10
         }
+        var labelsRect: NSRect?
         for label in labels.reversed() {
             let textSize = label.size
             let width = textSize.width + 7 + 7 + 5 + 7
             let rect = NSRect(x: right - width, y: midY - 10, width: width, height: 20)
             guard rect.minX > x + 120 else { break }
+            labelsRect = labelsRect.map { $0.union(rect) } ?? rect
             NSColor(Theme.chipBorder).setStroke()
             let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 9.5, yRadius: 9.5)
             outline.lineWidth = 1
@@ -506,6 +619,8 @@ final class IssueRowCell: NSView {
             label.text.draw(at: NSPoint(x: rect.minX + 19, y: midY - textSize.height / 2))
             right = rect.minX - 6
         }
+
+        if canEditFields, let labelsRect { parts.append((.labels, labelsRect)) }
 
         // The title takes what is left, with the sub-issue count directly after it.
         let subWidth: CGFloat? = subCount == nil ? nil : subCountSize.width + 7 + 11 + 4 + 7
@@ -517,6 +632,7 @@ final class IssueRowCell: NSView {
         )
         if let subCount, let subWidth {
             let rect = NSRect(x: x + titleWidth + 10, y: midY - 10, width: subWidth, height: 20)
+            parts.append((.subIssues, rect))
             NSColor(Theme.chipBorder).setStroke()
             let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 9.5, yRadius: 9.5)
             outline.lineWidth = 1
@@ -540,6 +656,7 @@ final class IssueRowCell: NSView {
             dot.stroke()
             subCount.draw(at: NSPoint(x: rect.minX + 7 + 11 + 4, y: midY - subCountSize.height / 2))
         }
+        self.parts = parts
     }
 
     private func drawPriority(_ level: PriorityLevel, x: CGFloat, midY: CGFloat) {
@@ -614,6 +731,13 @@ final class IssueHeaderCell: NSView {
         addButton.target = self
         addButton.action = #selector(add)
         addSubview(addButton)
+        // A click folds the section in or out; dragging the header still reorders sections.
+        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(toggle(_:))))
+    }
+
+    @objc private func toggle(_ recognizer: NSClickGestureRecognizer) {
+        guard let section, !addButton.frame.contains(recognizer.location(in: self)) else { return }
+        model?.toggleSection(section.id)
     }
 
     @available(*, unavailable)
@@ -654,7 +778,22 @@ final class IssueHeaderCell: NSView {
         NSColor(section.glyph.color).withAlphaComponent(0.07).setFill()
         band.fill()
         let midY = bounds.height / 2
-        let left = IssueTable.inset + 14
+        // The disclosure arrow: down while open, right while folded in.
+        let arrow = NSBezierPath()
+        let center = NSPoint(x: IssueTable.inset + 15, y: midY)
+        if section.collapsed {
+            arrow.move(to: NSPoint(x: center.x - 2, y: center.y - 3.5))
+            arrow.line(to: NSPoint(x: center.x + 2.5, y: center.y))
+            arrow.line(to: NSPoint(x: center.x - 2, y: center.y + 3.5))
+        } else {
+            arrow.move(to: NSPoint(x: center.x - 3.5, y: center.y - 2))
+            arrow.line(to: NSPoint(x: center.x, y: center.y + 2.5))
+            arrow.line(to: NSPoint(x: center.x + 3.5, y: center.y - 2))
+        }
+        arrow.close()
+        NSColor(Theme.textTertiary).setFill()
+        arrow.fill()
+        let left = IssueTable.inset + 28
         StatusPainter.draw(section.glyph, in: CGRect(x: left, y: midY - 7, width: 14, height: 14), cg: context)
         let title = NSAttributedString(string: section.title, attributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
@@ -728,7 +867,8 @@ extension StatusPainter {
 
 // MARK: - Context menu
 
-/// The right-click menu for an issue, as an AppKit menu.
+/// The right-click menu for an issue, used by cards, list rows and sub-issues alike. Each entry has an
+/// icon, and the property submenus show the same glyphs and number keys as the dropdowns.
 @MainActor
 struct ItemMenuBuilder {
     let model: AppModel
@@ -736,55 +876,138 @@ struct ItemMenuBuilder {
 
     func menu() -> NSMenu {
         let menu = NSMenu()
-        let status = NSMenu()
-        for option in model.statusOptions(projectId: item.projectId) {
-            status.addItem(ClosureMenuItem(option.name, checked: item.statusId == option.id) { [model, item] in
-                model.setStatus(item, to: option)
-            })
+        // Keep the enabled states set here instead of AppKit's automatic ones.
+        menu.autoenablesItems = false
+        model.loadRepoMeta(projectId: item.projectId)
+
+        let statuses = model.statusOptions(projectId: item.projectId)
+        if !statuses.isEmpty {
+            let status = NSMenu()
+            for (index, option) in statuses.enumerated() {
+                let entry = ClosureMenuItem(option.name, checked: item.statusId == option.id) { [model, item] in
+                    model.setStatus(item, to: option)
+                }
+                entry.image = MenuIcons.status(model.glyph(projectId: item.projectId, optionId: option.id))
+                number(entry, index + 1)
+                status.addItem(entry)
+            }
+            menu.addItem(submenu("Status", MenuIcons.status(model.glyph(of: item)), status))
         }
-        menu.addItem(submenu("Status", status))
 
         let priorities = model.priorityOptions(projectId: item.projectId)
         if !priorities.isEmpty {
             let priority = NSMenu()
-            priority.addItem(ClosureMenuItem("No priority", checked: item.priorityId == nil) { [model, item] in
+            let none = ClosureMenuItem("No priority", checked: item.priorityId == nil) { [model, item] in
                 model.setPriority(item, to: nil)
-            })
-            for option in priorities {
-                priority.addItem(ClosureMenuItem(option.name, checked: item.priorityId == option.id) { [model, item] in
-                    model.setPriority(item, to: option)
-                })
             }
-            menu.addItem(submenu("Priority", priority))
+            none.image = MenuIcons.priority(.none)
+            number(none, 0)
+            priority.addItem(none)
+            for (index, option) in priorities.enumerated() {
+                let entry = ClosureMenuItem(option.name, checked: item.priorityId == option.id) { [model, item] in
+                    model.setPriority(item, to: option)
+                }
+                entry.image = MenuIcons.priority(option.priorityLevel)
+                number(entry, index + 1)
+                priority.addItem(entry)
+            }
+            menu.addItem(submenu("Priority", MenuIcons.priority(model.priorityLevel(of: item)), priority))
         }
-        if item.kind != .draft, let viewer = model.viewer {
-            let mine = item.assignees.contains { $0.id == viewer.id }
-            menu.addItem(ClosureMenuItem(mine ? "Unassign Me" : "Assign to Me") { [model, item] in
-                model.toggleAssignee(item, viewer.person)
-            })
+
+        if item.kind != .draft {
+            let people = NSMenu()
+            people.autoenablesItems = false
+            for person in model.people(for: item) {
+                let entry = ClosureMenuItem(person.login, checked: item.assignees.contains { $0.id == person.id }) { [model, item] in
+                    model.toggleAssignee(item, person)
+                }
+                entry.image = MenuIcons.avatar(person)
+                people.addItem(entry)
+            }
+            let icon = item.assignees.first.map(MenuIcons.avatar) ?? MenuIcons.symbol("person.crop.circle")
+            menu.addItem(submenu("Assignee", icon, people))
+
+            let labels = NSMenu()
+            for label in model.labels(for: item) {
+                let entry = ClosureMenuItem(label.name, checked: item.labels.contains { $0.id == label.id }) { [model, item] in
+                    model.toggleLabel(item, label)
+                }
+                entry.image = MenuIcons.labelDot(label.color)
+                labels.addItem(entry)
+            }
+            if labels.items.isEmpty {
+                let empty = NSMenuItem(title: "No labels in this repository", action: nil, keyEquivalent: "")
+                empty.isEnabled = false
+                labels.addItem(empty)
+            }
+            menu.addItem(submenu("Labels", MenuIcons.symbol("tag"), labels))
+
+            if let viewer = model.viewer {
+                let mine = item.assignees.contains { $0.id == viewer.id }
+                let assignMe = ClosureMenuItem(mine ? "Unassign Me" : "Assign to Me") { [model, item] in
+                    model.toggleAssignee(item, viewer.person)
+                }
+                assignMe.image = MenuIcons.symbol(mine ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.plus")
+                hint(assignMe, "i")
+                menu.addItem(assignMe)
+            }
         }
+
+        menu.addItem(.separator())
+        let open = ClosureMenuItem("Open") { [model, item] in model.open(item) }
+        open.image = MenuIcons.symbol("arrow.up.left.and.arrow.down.right")
+        menu.addItem(open)
         if item.url != nil {
-            menu.addItem(.separator())
-            menu.addItem(ClosureMenuItem("Copy Link") { [model, item] in model.copyLink(item) })
-            menu.addItem(ClosureMenuItem("Open on GitHub") { [model, item] in model.openOnGitHub(item) })
+            let copy = ClosureMenuItem("Copy Link") { [model, item] in model.copyLink(item) }
+            copy.image = MenuIcons.symbol("link")
+            menu.addItem(copy)
+            let github = ClosureMenuItem("Open on GitHub") { [model, item] in model.openOnGitHub(item) }
+            github.image = MenuIcons.symbol("arrow.up.right.square")
+            menu.addItem(github)
         }
+
         if item.kind == .issue || item.kind == .draft {
             menu.addItem(.separator())
             let delete = ClosureMenuItem(item.kind == .draft ? "Delete Draft…" : "Delete Issue…") { [model, item] in
                 model.requestDelete(item)
             }
+            delete.image = MenuIcons.symbol("trash")
             delete.isEnabled = model.canDelete(item)
+            if delete.isEnabled {
+                delete.attributedTitle = NSAttributedString(string: delete.title, attributes: [
+                    .foregroundColor: NSColor.systemRed, .font: NSFont.menuFont(ofSize: 0),
+                ])
+            }
             menu.addItem(delete)
         }
-        // Keep the enabled state set above instead of AppKit's automatic one.
-        menu.autoenablesItems = false
+        showImages(in: menu)
         return menu
     }
 
-    private func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {
+    /// macOS 27 hides menu item images unless asked; these icons carry meaning, so they stay visible.
+    private func showImages(in menu: NSMenu) {
+        for entry in menu.items {
+            if entry.image != nil { entry.preferredImageVisibility = .visible }
+            if let submenu = entry.submenu { showImages(in: submenu) }
+        }
+    }
+
+    private func submenu(_ title: String, _ image: NSImage?, _ menu: NSMenu) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.image = image
         item.submenu = menu
         return item
+    }
+
+    /// Shows the number that picks this entry in the dropdowns; typing it while the submenu is open picks it too.
+    private func number(_ entry: NSMenuItem, _ value: Int) {
+        guard value <= 9 else { return }
+        hint(entry, String(value))
+    }
+
+    private func hint(_ entry: NSMenuItem, _ key: String) {
+        entry.keyEquivalent = key
+        entry.keyEquivalentModifierMask = []
     }
 }
 

@@ -148,6 +148,18 @@ extension AppModel {
         return counts.max { $0.value < $1.value }?.key ?? available.first?.id
     }
 
+    // MARK: Dropdowns
+
+    /// Opens the picker for one property of an issue under `rect`, given in window coordinates with the
+    /// origin at the top left.
+    func showPicker(_ kind: PickerKind, for item: Item, below rect: CGRect) {
+        guard let content = mainWindow?.contentView else { return }
+        let anchor = content.isFlipped ? rect : CGRect(x: rect.minX, y: content.bounds.height - rect.maxY, width: rect.width, height: rect.height)
+        Dropdown.show(below: anchor, in: content, model: self) { close in
+            ItemPicker(kind: kind, itemId: item.id, close: close)
+        }
+    }
+
     // MARK: Deleting
 
     /// Issues can be deleted with admin rights in their repository; drafts by anyone who can edit the board.
@@ -244,6 +256,31 @@ extension AppModel {
         }
         UserDefaults.standard.set(order, forKey: key)
         reloadNow()
+    }
+
+    // MARK: Folding list sections
+
+    private var collapsedKey: String? {
+        switch scope {
+        case .project(let id): "collapsed.\(id)"
+        case .myIssues: "collapsed.mine"
+        case nil: nil
+        }
+    }
+
+    /// Sections folded in, in the list. Kept per project on this Mac.
+    func isSectionCollapsed(_ id: String) -> Bool {
+        _ = collapseVersion
+        guard let key = collapsedKey else { return false }
+        return UserDefaults.standard.stringArray(forKey: key)?.contains(id) ?? false
+    }
+
+    func toggleSection(_ id: String) {
+        guard let key = collapsedKey else { return }
+        var folded = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        if folded.contains(id) { folded.remove(id) } else { folded.insert(id) }
+        UserDefaults.standard.set(Array(folded), forKey: key)
+        collapseVersion += 1
     }
 
     func addPriorityField(projectId: String) {

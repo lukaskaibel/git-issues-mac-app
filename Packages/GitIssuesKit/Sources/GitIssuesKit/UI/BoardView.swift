@@ -52,6 +52,19 @@ struct BoardView: View {
                 drag.scrollX = new[0]
                 drag.maxScrollX = new[1]
             }
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { frame in
+                drag.boardFrameInWindow = frame
+                // Right-clicking a card opens the same AppKit menu (with icons) as the list does.
+                ContextMenus.shared.register(drag.menuRegion, frame: frame) { [model, drag] point in
+                    guard model.openItem == nil, model.overlay == nil else { return nil }
+                    let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+                    guard let item = drag.card(at: local, in: model.columns.flatMap(\.items)) else { return nil }
+                    return ItemMenuBuilder(model: model, item: item).menu()
+                }
+            }
+            .onDisappear { ContextMenus.shared.remove(drag.menuRegion) }
             .coordinateSpace(.named(BoardDrag.space))
             .simultaneousGesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .named(BoardDrag.space))
@@ -132,6 +145,7 @@ struct ColumnView: View {
     @State private var scroll = ScrollPosition(edge: .top)
     @State private var metrics = ScrollMetrics()
     @State private var hoveredId: String?
+    @State private var hoveredPart: PickerKind?
 
     var body: some View {
         VStack(spacing: 8) {
@@ -149,6 +163,7 @@ struct ColumnView: View {
                         BoardCell(
                             card: model.cardModel(for: item), width: width, drag: drag,
                             highlighted: !model.isDragging && (hoveredId == item.id || model.focusedItemId == item.id),
+                            hoveredPart: hoveredId == item.id && !model.isDragging ? hoveredPart : nil,
                             avatarVersion: model.avatarVersion
                         )
                     }
@@ -159,12 +174,24 @@ struct ColumnView: View {
                 .contentShape(Rectangle())
                 .onContinuousHover(coordinateSpace: .named(BoardDrag.space)) { phase in
                     switch phase {
-                    case .active(let point): hover(card(at: point))
-                    case .ended: hover(nil)
+                    case .active(let point):
+                        hover(card(at: point))
+                        let part = drag.part(at: point, in: column.items)?.kind
+                        if part != hoveredPart { hoveredPart = part }
+                    case .ended:
+                        hover(nil)
+                        hoveredPart = nil
                     }
                 }
                 .gesture(SpatialTapGesture(coordinateSpace: .named(BoardDrag.space)).onEnded { value in
-                    if let item = card(at: value.location) { model.open(item) }
+                    // A click on a card's priority, labels, sub-issues or assignees opens that dropdown;
+                    // anywhere else on the card opens the issue.
+                    if let hit = drag.part(at: value.location, in: column.items) {
+                        let origin = drag.boardFrameInWindow.origin
+                        model.showPicker(hit.kind, for: hit.item, below: hit.rect.offsetBy(dx: origin.x, dy: origin.y))
+                    } else if let item = card(at: value.location) {
+                        model.open(item)
+                    }
                 })
             }
             .scrollIndicators(.never)
@@ -221,6 +248,7 @@ private struct BoardCell: View {
     var width: CGFloat
     var drag: BoardDrag
     var highlighted: Bool
+    var hoveredPart: PickerKind?
     var avatarVersion: Int
     @State private var owner = UUID()
 
@@ -236,9 +264,8 @@ private struct BoardCell: View {
                     )
                     .frame(height: drag.active?.size.height ?? 80)
             } else {
-                CardView(card: card, width: width, highlighted: highlighted, avatarVersion: avatarVersion)
+                CardView(card: card, width: width, highlighted: highlighted, avatarVersion: avatarVersion, hoveredPart: hoveredPart)
                     .equatable()
-                    .contextMenu { ItemContextMenu(item: card.item) }
             }
         }
         .onGeometryChange(for: CGRect.self) { proxy in

@@ -30,6 +30,8 @@ struct CardView: View, Equatable {
     var lifted = false
     /// Changes when avatar images finish loading, so cards repaint with them.
     var avatarVersion = 0
+    /// The clickable part under the pointer, drawn with a soft highlight.
+    var hoveredPart: PickerKind? = nil
 
     static let padding = CGSize(width: 12, height: 10)
     static let lineHeight: CGFloat = 16
@@ -67,6 +69,25 @@ struct CardView: View, Equatable {
     }
 }
 
+/// Where the clickable parts of each card were last drawn, in the card's own coordinates.
+final class CardRegionStore: @unchecked Sendable {
+    static let shared = CardRegionStore()
+    private let lock = NSLock()
+    private var regions: [String: [(kind: PickerKind, rect: CGRect)]] = [:]
+
+    func set(_ itemId: String, _ parts: [(kind: PickerKind, rect: CGRect)]) {
+        lock.lock()
+        regions[itemId] = parts
+        lock.unlock()
+    }
+
+    func parts(_ itemId: String) -> [(kind: PickerKind, rect: CGRect)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return regions[itemId] ?? []
+    }
+}
+
 private struct CardPainter {
     var context: GraphicsContext
     var size: CGSize
@@ -76,6 +97,14 @@ private struct CardPainter {
         let card = view.card
         let item = card.item
         let padding = CardView.padding
+        var parts: [(kind: PickerKind, rect: CGRect)] = []
+        func part(_ kind: PickerKind, _ rect: CGRect) {
+            parts.append((kind, rect))
+            if view.hoveredPart == kind, !view.lifted {
+                context.fill(Path(roundedRect: rect.insetBy(dx: -4, dy: -4), cornerRadius: 6), with: .color(Theme.controlActive))
+            }
+        }
+        defer { if !view.lifted { CardRegionStore.shared.set(item.id, parts) } }
         let outline = Path(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5), cornerRadius: 8, style: .continuous)
         let fill = view.lifted ? Theme.cardLifted : (view.highlighted ? Theme.cardHover : Theme.card)
         let border = view.lifted ? Theme.cardLiftedBorder : (view.highlighted ? Theme.cardHoverBorder : Theme.cardBorder)
@@ -105,6 +134,11 @@ private struct CardPainter {
                 at: CGPoint(x: x, y: topY), anchor: .leading
             )
         }
+        if item.kind != .draft {
+            let count = CGFloat(max(min(item.assignees.count, 3), 1))
+            let width = 18 + (count - 1) * 13
+            part(.assignees, CGRect(x: size.width - padding.width - width, y: topY - 9, width: width, height: 18))
+        }
         drawAvatars(item.assignees, rightEdge: size.width - padding.width, midY: topY, ring: fill)
 
         // Title, wrapped to at most three lines.
@@ -115,16 +149,26 @@ private struct CardPainter {
         let bottomY = titleRect.maxY + 6 + 10
         x = padding.width
         if card.showsPriority {
+            part(.priority, CGRect(x: x, y: bottomY - 7, width: 14, height: 14))
             drawPriority(card.priority, x: x, midY: bottomY)
             x += 14 + 6
         }
         let limit = size.width - padding.width
         var shown = 0
+        // Labels are measured first, so the highlight can sit behind all of them.
+        var labelLayout: [(label: LabelRef, text: GraphicsContext.ResolvedText, rect: CGRect)] = []
+        var labelX = x
         for label in item.labels.prefix(2) {
             let text = context.resolve(Text(label.name).font(.tiny).foregroundStyle(Theme.textSecondary))
             let width = text.measure(in: CGSize(width: 400, height: 40)).width + 7 + 7 + 5 + 7
-            guard x + width <= limit else { break }
-            let rect = CGRect(x: x, y: bottomY - 10, width: width, height: 20)
+            guard labelX + width <= limit else { break }
+            labelLayout.append((label, text, CGRect(x: labelX, y: bottomY - 10, width: width, height: 20)))
+            labelX += width + 6
+        }
+        if item.kind != .draft, let first = labelLayout.first, let last = labelLayout.last {
+            part(.labels, first.rect.union(last.rect))
+        }
+        for (label, text, rect) in labelLayout {
             chip(rect)
             context.fill(Path(ellipseIn: CGRect(x: rect.minX + 7, y: bottomY - 3.5, width: 7, height: 7)), with: .color(Theme.labelColor(label.color)))
             context.draw(text, at: CGPoint(x: rect.minX + 19, y: bottomY), anchor: .leading)
@@ -148,6 +192,7 @@ private struct CardPainter {
             let width = text.measure(in: CGSize(width: 200, height: 40)).width + 7 + 11 + 4 + 7
             if x + width <= limit {
                 let rect = CGRect(x: x, y: bottomY - 10, width: width, height: 20)
+                part(.subIssues, rect)
                 chip(rect)
                 let origin = CGPoint(x: rect.minX + 7, y: bottomY - 5.5)
                 var glyph = Path()
@@ -208,63 +253,6 @@ private struct CardPainter {
                     at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center
                 )
             }
-        }
-    }
-}
-
-/// Right-click menu shared by cards and list rows.
-struct ItemContextMenu: View {
-    @Environment(AppModel.self) private var model
-    var item: Item
-
-    var body: some View {
-        Menu("Status") {
-            ForEach(model.statusOptions(projectId: item.projectId)) { option in
-                Button {
-                    withAnimation(Theme.spring) { model.setStatus(item, to: option) }
-                } label: {
-                    if item.statusId == option.id {
-                        Label(option.name, systemImage: "checkmark")
-                    } else {
-                        Text(option.name)
-                    }
-                }
-            }
-        }
-        let priorities = model.priorityOptions(projectId: item.projectId)
-        if !priorities.isEmpty {
-            Menu("Priority") {
-                Button("No priority") { model.setPriority(item, to: nil) }
-                ForEach(priorities) { option in
-                    Button {
-                        model.setPriority(item, to: option)
-                    } label: {
-                        if item.priorityId == option.id {
-                            Label(option.name, systemImage: "checkmark")
-                        } else {
-                            Text(option.name)
-                        }
-                    }
-                }
-            }
-        }
-        if item.kind != .draft, let viewer = model.viewer {
-            let mine = item.assignees.contains { $0.id == viewer.id }
-            Button(mine ? "Unassign Me" : "Assign to Me") {
-                model.toggleAssignee(item, viewer.person)
-            }
-        }
-        Divider()
-        if item.url != nil {
-            Button("Copy Link") { model.copyLink(item) }
-            Button("Open on GitHub") { model.openOnGitHub(item) }
-        }
-        if item.kind == .issue || item.kind == .draft {
-            Divider()
-            Button(item.kind == .draft ? "Delete Draft…" : "Delete Issue…", role: .destructive) {
-                model.requestDelete(item)
-            }
-            .disabled(!model.canDelete(item))
         }
     }
 }

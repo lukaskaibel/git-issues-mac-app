@@ -8,12 +8,18 @@ struct PickerItem: Identifiable {
     var selected = false
     var icon: AnyView
     var shortcut: String?
+    /// Shown before the title in a quieter colour, such as an issue number.
+    var prefix: String? = nil
+    /// Shown at the end of the row, such as priority and assignee.
+    var trailing: AnyView? = nil
 }
 
 /// A searchable list driven entirely from the keyboard: type to filter, arrows to move, Return to pick.
 struct PickerList: View {
     var placeholder: String
     var items: [PickerItem]
+    /// The key that opens this picker from the board, shown at the end of the search field.
+    var hint: String? = nil
     /// Multi-select pickers stay open after a pick.
     var staysOpen = false
     var width: CGFloat = 260
@@ -29,13 +35,16 @@ struct PickerList: View {
     var body: some View {
         let visible = filtered
         VStack(spacing: 0) {
-            TextField(placeholder, text: $query)
-                .textFieldStyle(.plain)
-                .font(fieldFont)
-                .focused($focused)
-                .focusOnAppear()
+            HStack(spacing: 8) {
+                TextField(placeholder, text: $query)
+                    .textFieldStyle(.plain)
+                    .font(fieldFont)
+                    .focused($focused)
+                    .focusOnAppear()
+                if let hint { Keycap(hint) }
+            }
                 .padding(.horizontal, 12)
-                .frame(height: 36)
+                .frame(height: 40)
                 .onKeyPress(.downArrow) {
                     index = min(index + 1, max(visible.count - 1, 0))
                     return .handled
@@ -120,18 +129,25 @@ struct PickerRow: View {
     var body: some View {
         HStack(spacing: 10) {
             item.icon.frame(width: 18, height: 18)
-            Text(item.title).lineLimit(1)
+            if let prefix = item.prefix {
+                Text(prefix).font(.small).monospacedDigit().foregroundStyle(Theme.textTertiary).lineLimit(1)
+            }
+            Text(item.title).lineLimit(1).truncationMode(.tail)
             if let subtitle = item.subtitle {
                 Text(subtitle).foregroundStyle(Theme.textSecondary).lineLimit(1)
             }
             Spacer(minLength: 8)
+            if let trailing = item.trailing { trailing }
             if item.selected {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.textBody)
             }
             if let shortcut = item.shortcut {
-                Keycap(shortcut, emphasized: active)
+                Text(shortcut)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(active ? Theme.textSecondary : Theme.textTertiary)
+                    .frame(minWidth: 12, alignment: .trailing)
             }
         }
         .padding(.horizontal, 8)
@@ -171,6 +187,58 @@ enum PickerKind: Equatable {
     case priority
     case assignees
     case labels
+    case subIssues
+
+    var placeholder: String {
+        switch self {
+        case .status: "Change status…"
+        case .priority: "Change priority to…"
+        case .assignees: "Assign to…"
+        case .labels: "Add labels…"
+        case .subIssues: "Open sub-issue…"
+        }
+    }
+
+    /// The key that opens the same picker from the board.
+    var hint: String? {
+        switch self {
+        case .status: "S"
+        case .priority: "P"
+        case .assignees: "A"
+        case .labels: "L"
+        case .subIssues: nil
+        }
+    }
+
+    var staysOpen: Bool { self == .assignees || self == .labels }
+
+    var width: CGFloat { self == .subIssues ? 460 : 280 }
+}
+
+/// A picker for one property of one issue, as shown in dropdowns and the command palette.
+struct ItemPicker: View {
+    @Environment(AppModel.self) private var model
+    var kind: PickerKind
+    var itemId: String
+    var width: CGFloat?
+    var fieldFont: Font = .ui
+    var close: () -> Void
+
+    var body: some View {
+        if let item = model.allItems.first(where: { $0.id == itemId }) {
+            PickerList(
+                placeholder: kind.placeholder,
+                items: model.pickerItems(kind, for: item),
+                hint: kind.hint,
+                staysOpen: kind.staysOpen,
+                width: width ?? kind.width,
+                maxRows: 10,
+                fieldFont: fieldFont,
+                onPick: { model.pick(kind, id: $0, for: item) },
+                onClose: close
+            )
+        }
+    }
 }
 
 extension AppModel {
@@ -212,7 +280,28 @@ extension AppModel {
                     icon: AnyView(Circle().fill(Theme.labelColor(label.color)).frame(width: 9, height: 9))
                 )
             }
+        case .subIssues:
+            return subIssueItems(of: item).map { sub in
+                PickerItem(
+                    id: sub.id, title: sub.title,
+                    icon: AnyView(StatusIcon(glyph: glyph(of: sub))),
+                    prefix: sub.displayNumber,
+                    trailing: AnyView(HStack(spacing: 10) {
+                        PriorityIcon(level: priorityLevel(of: sub))
+                        Group {
+                            if sub.assignees.isEmpty { Color.clear } else { AvatarStack(people: sub.assignees) }
+                        }
+                        .frame(width: 30, height: 18, alignment: .trailing)
+                    })
+                )
+            }
         }
+    }
+
+    /// Sub-issues of an issue that are on the same board, in board order.
+    func subIssueItems(of item: Item) -> [Item] {
+        guard let contentId = item.contentId else { return [] }
+        return allItems.filter { $0.projectId == item.projectId && $0.parentId == contentId }
     }
 
     func pick(_ kind: PickerKind, id: String, for item: Item) {
@@ -229,6 +318,8 @@ extension AppModel {
             if let person = people(for: current).first(where: { $0.id == id }) { toggleAssignee(current, person) }
         case .labels:
             if let label = labels(for: current).first(where: { $0.id == id }) { toggleLabel(current, label) }
+        case .subIssues:
+            if let sub = allItems.first(where: { $0.id == id }) { open(sub) }
         }
     }
 
@@ -267,9 +358,8 @@ extension AppModel {
     }
 }
 
-/// A property value that opens its picker in a popover when clicked.
+/// A property value that opens its picker in a dropdown when clicked.
 struct PropertyButton<Label: View>: View {
-    @Environment(AppModel.self) private var model
     var kind: PickerKind
     var item: Item
     @ViewBuilder var label: Label
@@ -286,24 +376,8 @@ struct PropertyButton<Label: View>: View {
                 .hoverFill(active: open)
         }
         .buttonStyle(PlainPressStyle())
-        .popover(isPresented: $open, arrowEdge: .leading) {
-            PickerList(
-                placeholder: placeholder,
-                items: model.pickerItems(kind, for: model.allItems.first { $0.id == item.id } ?? item),
-                staysOpen: kind == .assignees || kind == .labels,
-                onPick: { model.pick(kind, id: $0, for: item) },
-                onClose: { open = false }
-            )
-            .background(Theme.popover)
-        }
-    }
-
-    private var placeholder: String {
-        switch kind {
-        case .status: "Change status…"
-        case .priority: "Set priority…"
-        case .assignees: "Assign to…"
-        case .labels: "Add labels…"
+        .dropdown(isPresented: $open) { close in
+            ItemPicker(kind: kind, itemId: item.id, close: close)
         }
     }
 }

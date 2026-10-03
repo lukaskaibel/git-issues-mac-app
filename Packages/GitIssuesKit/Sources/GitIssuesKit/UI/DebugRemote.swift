@@ -53,7 +53,7 @@ enum DebugRemote {
     private static func run(_ line: String, model: AppModel) {
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
         let argument = parts.count > 1 ? parts[1] : ""
-        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait", "renderpill", "responder", "click", "key", "keycode", "keycmd", "overlay", "focusdesc"]
+        let readOnly: Set<String> = ["select", "dump", "notice", "mode", "open", "close", "focus", "scrolltest", "appearance", "icon", "settings", "back", "forward", "wait", "renderpill", "responder", "click", "key", "keycode", "keycmd", "overlay", "focusdesc", "scrolllist", "rightclick", "listdump", "togglesection"]
         if let command = parts.first, !readOnly.contains(command), model.currentProject?.title != sandboxTitle {
             log("refused \"\(line)\": the open project is not the sandbox")
             return
@@ -96,10 +96,10 @@ enum DebugRemote {
             if let character = argument.first {
                 sendKey(characters: String(character), code: 0, modifiers: .command)
             }
-        case "click":
-            // click <x> <y> in points from the window's top-left corner, as a left mouse click.
+        case "click", "rightclick":
+            // click|rightclick <x> <y> in points from the window's top-left corner.
             let bits = argument.split(separator: " ").compactMap { Double($0) }
-            if bits.count == 2 { click(at: CGPoint(x: bits[0], y: bits[1])) }
+            if bits.count == 2 { click(at: CGPoint(x: bits[0], y: bits[1]), right: parts.first == "rightclick") }
         case "responder":
             // Which control has the keyboard focus: the field editor means a single-line text field.
             let window = NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frame.width > 600 }
@@ -178,6 +178,32 @@ enum DebugRemote {
             model.goBack()
         case "forward":
             model.goForward()
+        case "togglesection":
+            if let section = model.sections.first(where: { $0.title == argument }) { model.toggleSection(section.id) }
+        case "listdump":
+            if let root = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 })?.contentView {
+                func find(_ view: NSView) -> HoverTableView? {
+                    if let table = view as? HoverTableView { return table }
+                    for subview in view.subviews { if let found = find(subview) { return found } }
+                    return nil
+                }
+                let summary: String = find(root)?.coordinator?.listSummary ?? "no table"
+                log("list: " + summary)
+            }
+        case "scrolllist":
+            // scrolllist <y>: scrolls the tallest scroll view to y points from the top.
+            if let root = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 })?.contentView, let y = Double(argument) {
+                var views: [NSScrollView] = []
+                func collect(_ view: NSView) {
+                    if let scroll = view as? NSScrollView { views.append(scroll) }
+                    view.subviews.forEach(collect)
+                }
+                collect(root)
+                if let scroll = views.max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }) {
+                    scroll.contentView.scroll(to: NSPoint(x: 0, y: y - scroll.contentInsets.top))
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
+            }
         case "scrolltest":
             scrollTest(label: argument)
         case "dump":
@@ -339,18 +365,23 @@ enum DebugRemote {
         return nil
     }
 
-    private static func click(at point: CGPoint) {
+    private static func click(at point: CGPoint, right: Bool = false) {
         guard let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 }),
               let content = window.contentView else { return }
         let location = CGPoint(x: point.x, y: content.bounds.height - point.y)
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            if let event = NSEvent.mouseEvent(
+        let types: [NSEvent.EventType] = right ? [.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp]
+        let events = types.compactMap { type in
+            NSEvent.mouseEvent(
                 with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
-            ) {
-                NSApp.sendEvent(event)
-            }
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: type == .leftMouseDown || type == .rightMouseDown ? 1 : 0
+            )
         }
+        guard events.count == 2 else { return }
+        // AppKit controls track the mouse in a loop that reads the queue until the button comes up,
+        // so the release waits in the queue before the press is sent.
+        NSApp.postEvent(events[1], atStart: false)
+        NSApp.sendEvent(events[0])
     }
 
     private static func sendKeys(_ text: String) {

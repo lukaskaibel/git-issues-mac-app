@@ -115,6 +115,8 @@ public final class AppModel {
     var settingsRequest = 0
     /// The issue waiting for "Delete?" to be confirmed.
     var deletionCandidate: Item?
+    /// Bumped when a list section is folded in or out, so the list redraws.
+    var collapseVersion = 0
     var overlay: Overlay? {
         didSet {
             if overlay != nil, overlay != oldValue { overlayOpenedAt = Date() }

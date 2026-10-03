@@ -251,6 +251,7 @@ private struct SubIssueRow: View {
     var sub: SubIssue
     var showsPriority: Bool
     @State private var hovering = false
+    @State private var menuRegion = UUID()
 
     var body: some View {
         let boardItem = model.item(contentId: sub.id)
@@ -307,11 +308,19 @@ private struct SubIssueRow: View {
                 NSWorkspace.shared.open(url)
             }
         }
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .global)
+        } action: { frame in
+            // A sub-issue on the board gets the same menu as its card.
+            if let id = model.item(contentId: sub.id)?.id {
+                ContextMenus.shared.register(menuRegion, frame: frame) { [model] _ in
+                    model.allItems.first { $0.id == id }.map { ItemMenuBuilder(model: model, item: $0).menu() }
+                }
+            }
+        }
+        .onDisappear { ContextMenus.shared.remove(menuRegion) }
         .contextMenu {
-            if let boardItem {
-                // The same menu as a card on the board.
-                ItemContextMenu(item: boardItem)
-            } else {
+            if boardItem == nil {
                 Button(sub.isClosed ? "Reopen" : "Mark as Done") {
                     withAnimation(Theme.spring) { model.setClosed(sub, !sub.isClosed) }
                 }

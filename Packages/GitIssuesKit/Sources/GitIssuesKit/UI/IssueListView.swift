@@ -12,11 +12,14 @@ struct IssueListView: View {
             IssueTable(
                 sections: model.sections.map { section in
                     IssueSectionModel(
-                        id: section.id, title: section.title, glyph: section.glyph, optionId: section.option?.id,
+                        id: section.id, collapsed: model.isSectionCollapsed(section.id),
+                        title: section.title, glyph: section.glyph, optionId: section.option?.id,
                         canAdd: canAdd, count: section.items.count,
-                        rows: section.items.map { item in
+                        rows: model.isSectionCollapsed(section.id) ? [] : section.items.map { item in
                             IssueRowModel(
                                 item: item, glyph: model.glyph(of: item), priority: model.priorityLevel(of: item),
+                                showsPriority: model.project(of: item)?.priorityFieldId != nil,
+                                showsStatus: model.project(of: item)?.statusFieldId != nil,
                                 projectTitle: showsProject ? model.project(of: item)?.title : nil
                             )
                         }
@@ -28,6 +31,7 @@ struct IssueListView: View {
             )
             // A different project starts at the top again.
             .id(model.scope)
+            .padding(.top, 6)
             .task(id: model.scope) { await model.preloadAvatars() }
         }
     }

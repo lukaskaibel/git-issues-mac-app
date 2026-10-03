@@ -12,13 +12,13 @@ struct CommandPalette: View {
             case .root:
                 RootPalette()
             case .status(let id):
-                step(.status, id, "Change status…")
+                step(.status, id)
             case .priority(let id):
-                step(.priority, id, "Set priority…")
+                step(.priority, id)
             case .assignees(let id):
-                step(.assignees, id, "Assign to…")
+                step(.assignees, id)
             case .labels(let id):
-                step(.labels, id, "Add labels…")
+                step(.labels, id)
             case .projects:
                 PickerList(
                     placeholder: "Switch project…",
@@ -43,17 +43,10 @@ struct CommandPalette: View {
     }
 
     @ViewBuilder
-    private func step(_ kind: PickerKind, _ itemId: String, _ placeholder: String) -> some View {
+    private func step(_ kind: PickerKind, _ itemId: String) -> some View {
         if let item = model.allItems.first(where: { $0.id == itemId }) {
             ContextChip(item: item)
-            PickerList(
-                placeholder: placeholder,
-                items: model.pickerItems(kind, for: item),
-                staysOpen: kind == .assignees || kind == .labels,
-                width: 640, maxRows: 10, fieldFont: .system(size: 15),
-                onPick: { model.pick(kind, id: $0, for: item) },
-                onClose: { model.overlay = nil }
-            )
+            ItemPicker(kind: kind, itemId: itemId, width: 640, fieldFont: .system(size: 15)) { model.overlay = nil }
         }
     }
 }

@@ -207,24 +207,15 @@ struct NewIssueView: View {
                 .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Theme.popoverBorder, lineWidth: 1))
         }
         .buttonStyle(PlainPressStyle())
-        .popover(isPresented: Binding(get: { openPicker == kind }, set: { if !$0 { openPicker = nil } }), arrowEdge: .bottom) {
+        .dropdown(isPresented: Binding(get: { openPicker == kind }, set: { if !$0 { openPicker = nil } })) { close in
             PickerList(
-                placeholder: placeholder(kind),
+                placeholder: kind.placeholder,
                 items: items(kind),
-                staysOpen: kind == .assignees || kind == .labels,
+                staysOpen: kind.staysOpen,
+                width: kind.width,
                 onPick: { pick(kind, $0) },
-                onClose: { openPicker = nil }
+                onClose: close
             )
-            .background(Theme.popover)
-        }
-    }
-
-    private func placeholder(_ kind: PickerKind) -> String {
-        switch kind {
-        case .status: "Status…"
-        case .priority: "Priority…"
-        case .assignees: "Assign to…"
-        case .labels: "Labels…"
         }
     }
 
@@ -254,6 +245,8 @@ struct NewIssueView: View {
                     icon: AnyView(Circle().fill(Theme.labelColor(label.color)).frame(width: 9, height: 9))
                 )
             }
+        case .subIssues:
+            return []
         }
     }
 
@@ -275,6 +268,8 @@ struct NewIssueView: View {
             } else if let label = model.labels(projectId: draft.projectId, repoId: draft.repoId).first(where: { $0.id == id }) {
                 draft.labels.append(label)
             }
+        case .subIssues:
+            break
         }
     }
 }

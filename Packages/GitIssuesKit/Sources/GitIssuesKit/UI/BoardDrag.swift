@@ -34,6 +34,9 @@ final class BoardDrag {
 
     @ObservationIgnored private(set) var cardFrames: [String: CGRect] = [:]
     @ObservationIgnored var columnFrames: [String: CGRect] = [:]
+    /// Where the board sits in the window (top-left origin), to anchor dropdowns and menus.
+    @ObservationIgnored var boardFrameInWindow: CGRect = .zero
+    @ObservationIgnored let menuRegion = UUID()
     /// The board's horizontal scroll position, for deciding whether a sideways swipe scrolls or navigates.
     @ObservationIgnored var scrollX: CGFloat = 0
     @ObservationIgnored var maxScrollX: CGFloat = 0
@@ -43,6 +46,20 @@ final class BoardDrag {
     func setCardFrame(_ frame: CGRect, for id: String, owner: UUID) {
         cardFrames[id] = frame
         frameOwners[id] = owner
+    }
+
+    func card(at point: CGPoint, in items: [Item]) -> Item? {
+        items.first { cardFrames[$0.id]?.contains(point) == true }
+    }
+
+    /// The clickable part of a card under a point, with its frame in board coordinates.
+    func part(at point: CGPoint, in items: [Item]) -> (item: Item, kind: PickerKind, rect: CGRect)? {
+        guard let item = card(at: point, in: items), let frame = cardFrames[item.id] else { return nil }
+        for part in CardRegionStore.shared.parts(item.id) {
+            let rect = part.rect.offsetBy(dx: frame.minX, dy: frame.minY)
+            if rect.insetBy(dx: -3, dy: -4).contains(point) { return (item, part.kind, rect) }
+        }
+        return nil
     }
 
     func removeCardFrame(for id: String, owner: UUID) {

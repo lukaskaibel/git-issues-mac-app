@@ -8,6 +8,14 @@ All notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- Clicking an issue's priority, status, labels, assignees or sub-issue count, on a card or in the list, opens a
+  dropdown right there, as in Linear: the search field has focus, number keys pick, and the current value is
+  checked. The sub-issue count lists the sub-issues and opens the one you pick. The parts light up on hover.
+- All dropdowns (also in the issue view and the new-issue dialog) open as floating panels without an arrow, take
+  the keyboard straight away, shrink as you filter, and close with Escape or a click elsewhere.
+- The right-click menu has icons and submenus for status, priority, assignee and labels, with the same glyphs and
+  number keys as the dropdowns. Cards, list rows and sub-issues share it.
+- List sections fold in and out with a click on their header, shown by an arrow on the left. Kept per project.
 - Descriptions are edited in place, as in Linear: click anywhere and type. Markdown is styled as you type
   (headings, bold, italics, code, links, lists) and saved after a short pause or when you leave the field. Escape
   leaves the field; ⌘↵ does too.
@@ -27,6 +35,8 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- In the list, the header of the section you've scrolled into stays at the top without a line under it, and no
+  rows show above it; the next header pushes it up.
 - The command palette, its pickers and the new-issue dialog reliably take keyboard focus when they open, so you
   can type straight away. Before, SwiftUI sometimes dropped the focus request and left nothing focused.
 - Escape closes the command palette and the new-issue dialog whatever has focus inside them.

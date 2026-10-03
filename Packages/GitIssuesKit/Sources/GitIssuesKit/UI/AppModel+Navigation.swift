@@ -160,6 +160,19 @@ extension AppModel {
             }
             return handled ? nil : event
         }
+        // Right-click menus on SwiftUI areas (cards, sub-issues). The list's table shows its own.
+        NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { [weak self] event in
+            guard let self, ContextMenus.isContextClick(event) else { return event }
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                guard self.signedIn, self.overlay == nil, let window = event.window, window === self.mainWindow,
+                      let content = window.contentView else { return false }
+                let point = CGPoint(x: event.locationInWindow.x, y: content.bounds.height - event.locationInWindow.y)
+                guard let menu = ContextMenus.shared.menu(at: point) else { return false }
+                NSMenu.popUpContextMenu(menu, with: event, for: content)
+                return true
+            }
+            return handled ? nil : event
+        }
         // Two-finger swipe, as in Safari.
         NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             guard let self else { return event }
