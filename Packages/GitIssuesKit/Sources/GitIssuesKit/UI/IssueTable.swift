@@ -81,8 +81,11 @@ struct IssueTable: NSViewRepresentable {
             name: NSView.boundsDidChangeNotification, object: scroll.contentView
         )
         let sticky = IssueHeaderCell()
+        sticky.handlesClicks = true
         sticky.isHidden = true
         scroll.addSubview(sticky)
+        // While the next header pushes it up, it slides out under the top edge instead of over the toolbar.
+        scroll.clipsToBounds = true
         context.coordinator.sticky = sticky
         context.coordinator.scrollView = scroll
         return scroll
@@ -342,8 +345,9 @@ struct IssueTable: NSViewRepresentable {
             }
             sticky.configure(current.section, model: model)
             stickySectionId = current.section.id
-            // NSScrollView isn't flipped: its top edge is at maxY.
-            sticky.frame = NSRect(x: 0, y: scrollView.bounds.height - height - offset, width: scrollView.bounds.width, height: height)
+            // `offset` is zero or negative: the next header pushes the sticky one up.
+            let y = scrollView.isFlipped ? offset : scrollView.bounds.height - height - offset
+            sticky.frame = NSRect(x: 0, y: y, width: scrollView.bounds.width, height: height)
             sticky.isHidden = false
         }
 
@@ -363,6 +367,10 @@ struct IssueTable: NSViewRepresentable {
 
         @objc func clicked(_ sender: NSTableView) {
             let row = sender.clickedRow
+            if row >= 0, let header = sender.view(atColumn: 0, row: row, makeIfNecessary: false) as? IssueHeaderCell {
+                if let event = NSApp.currentEvent { header.click(at: header.convert(event.locationInWindow, from: nil)) }
+                return
+            }
             guard let item = item(at: row) else { return }
             if let event = NSApp.currentEvent,
                let cell = sender.view(atColumn: 0, row: row, makeIfNecessary: false) as? IssueRowCell,
@@ -731,13 +739,26 @@ final class IssueHeaderCell: NSView {
         addButton.target = self
         addButton.action = #selector(add)
         addSubview(addButton)
-        // A click folds the section in or out; dragging the header still reorders sections.
-        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(toggle(_:))))
     }
 
-    @objc private func toggle(_ recognizer: NSClickGestureRecognizer) {
-        guard let section, !addButton.frame.contains(recognizer.location(in: self)) else { return }
+    /// The copy pinned over the top of the list takes clicks itself; headers inside the table leave them
+    /// to the table, which also lets you drag them to reorder sections.
+    var handlesClicks = false
+
+    /// A click folds the section in or out, except on the + button.
+    func click(at point: NSPoint) {
+        guard let section, !addButton.frame.contains(point) else { return }
         model?.toggleSection(section.id)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if !handlesClicks { super.mouseDown(with: event) }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard handlesClicks else { return super.mouseUp(with: event) }
+        let point = convert(event.locationInWindow, from: nil)
+        if bounds.contains(point) { click(at: point) }
     }
 
     @available(*, unavailable)

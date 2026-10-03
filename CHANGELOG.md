@@ -16,6 +16,8 @@ All notable changes to this project are recorded here. The format follows
 - The right-click menu has icons and submenus for status, priority, assignee and labels, with the same glyphs and
   number keys as the dropdowns. Cards, list rows and sub-issues share it.
 - List sections fold in and out with a click on their header, shown by an arrow on the left. Kept per project.
+- Every status header in the list stays pinned at the top while you scroll through its section, and the next
+  header pushes it out of the way. The pinned header folds its section with a click too.
 - Descriptions are edited in place, as in Linear: click anywhere and type. Markdown is styled as you type
   (headings, bold, italics, code, links, lists) and saved after a short pause or when you leave the field. Escape
   leaves the field; ⌘↵ does too.
