@@ -209,7 +209,9 @@ struct IssueTable: NSViewRepresentable {
             case .header(let section):
                 (view as? IssueHeaderCell)?.configure(section, model: model)
             case .row(let row):
-                (view as? IssueRowCell)?.configure(row, highlighted: row.item.id == hoveredId || row.item.id == focusedId)
+                let cell = view as? IssueRowCell
+                cell?.model = model
+                cell?.configure(row, highlighted: row.item.id == hoveredId || row.item.id == focusedId)
             }
         }
 
@@ -409,8 +411,34 @@ struct IssueTable: NSViewRepresentable {
         }
 
         func menu(forRow row: Int) -> NSMenu? {
+            if entries.indices.contains(row), case .header(let section) = entries[row] {
+                return Self.sectionMenu(section, model: model)
+            }
             guard let item = item(at: row) else { return nil }
             return ItemMenuBuilder(model: model, item: item).menu()
+        }
+
+        /// A section header's menu: fold this one or all of them, or start an issue in it.
+        static func sectionMenu(_ section: IssueSectionModel, model: AppModel) -> NSMenu {
+            let menu = NSMenu()
+            let fold = ClosureMenuItem(section.collapsed ? "Unfold" : "Fold") { [model] in model.toggleSection(section.id) }
+            fold.image = MenuIcons.symbol(section.collapsed ? "chevron.down" : "chevron.right")
+            menu.addItem(fold)
+            let all = ClosureMenuItem(section.collapsed ? "Unfold All" : "Fold All") { [model] in
+                model.toggleAllSections(like: section.id)
+            }
+            all.image = MenuIcons.symbol(section.collapsed ? "chevron.down.2" : "chevron.right.2")
+            menu.addItem(all)
+            if section.canAdd {
+                menu.addItem(.separator())
+                let add = ClosureMenuItem("New Issue in \(section.title)") { [model] in
+                    model.overlay = .newIssue(statusId: section.optionId, parentItemId: nil)
+                }
+                add.image = MenuIcons.symbol("plus")
+                menu.addItem(add)
+            }
+            for entry in menu.items where entry.image != nil { entry.preferredImageVisibility = .visible }
+            return menu
         }
     }
 }
@@ -471,8 +499,11 @@ final class PlainRowView: NSTableRowView {
 // MARK: - Cells
 
 /// One issue, drawn directly. Configuring and drawing a recycled cell takes a fraction of a millisecond.
-final class IssueRowCell: NSView {
+final class IssueRowCell: NSView, NSViewToolTipOwner {
+    weak var model: AppModel?
     private var row: IssueRowModel?
+    /// The date's place, for its tooltip.
+    private var dateRect = NSRect.zero
     private var highlighted = false
     private var number = NSAttributedString()
     private var title = NSAttributedString()
@@ -577,34 +608,63 @@ final class IssueRowCell: NSView {
             NSColor(Theme.selected).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: IssueTable.inset, dy: 1), xRadius: 7, yRadius: 7).fill()
         }
-        if let hoveredPart, let rect = parts.first(where: { $0.kind == hoveredPart })?.rect {
-            NSColor(Theme.controlActive).setFill()
-            NSBezierPath(roundedRect: rect.insetBy(dx: -4, dy: -4), xRadius: 6, yRadius: 6).fill()
+        // Each part lights up in a shape that suits it, as in Linear: a small square behind an icon, a halo
+        // around avatars, and chips in their own outline.
+        func iconHover(_ kind: PickerKind, _ rect: NSRect) {
+            guard hoveredPart == kind else { return }
+            NSColor(Theme.partHover).setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: -4, dy: -4), xRadius: 5, yRadius: 5).fill()
         }
         var parts: [(kind: PickerKind, rect: NSRect)] = []
         let canEditFields = row.item.kind != .draft
 
         // Left to right: priority, number, status.
         var x: CGFloat = IssueTable.inset + 14
+        if row.showsPriority {
+            let rect = NSRect(x: x, y: midY - 7, width: 14, height: 14)
+            parts.append((.priority, rect))
+            iconHover(.priority, rect)
+        }
         drawPriority(row.priority, x: x, midY: midY)
-        if row.showsPriority { parts.append((.priority, NSRect(x: x, y: midY - 7, width: 14, height: 14))) }
         x += 14 + 10
         number.draw(at: NSPoint(x: x, y: midY - numberSize.height / 2))
         x += 40 + 10
+        if row.showsStatus {
+            let rect = NSRect(x: x, y: midY - 7, width: 14, height: 14)
+            parts.append((.status, rect))
+            iconHover(.status, rect)
+        }
         StatusPainter.draw(row.glyph, in: CGRect(x: x, y: midY - 7, width: 14, height: 14), cg: context)
-        if row.showsStatus { parts.append((.status, NSRect(x: x, y: midY - 7, width: 14, height: 14))) }
         x += 14 + 10
 
         // Right to left: assignees, date, project, labels.
         var right = size.width - IssueTable.inset - 14
-        drawAvatars(row.item.assignees, rightEdge: right, midY: midY, context: context)
+        var avatarRing = NSColor(highlighted ? Theme.selected : Theme.panel)
         if canEditFields {
             let count = CGFloat(max(min(row.item.assignees.count, 3), 1))
             let width = 18 + (count - 1) * 13
-            parts.append((.assignees, NSRect(x: right - width, y: midY - 9, width: width, height: 18)))
+            let rect = NSRect(x: right - width, y: midY - 9, width: width, height: 18)
+            parts.append((.assignees, rect))
+            if hoveredPart == .assignees {
+                let halo = rect.insetBy(dx: -3, dy: -3)
+                avatarRing = NSColor(Theme.partHover)
+                avatarRing.setFill()
+                NSBezierPath(roundedRect: halo, xRadius: halo.height / 2, yRadius: halo.height / 2).fill()
+                if row.item.assignees.isEmpty {
+                    // Where an avatar would be, as Linear shows for an unassigned issue.
+                    let circle = NSRect(x: rect.maxX - 18, y: midY - 9, width: 18, height: 18).insetBy(dx: 1.5, dy: 1.5)
+                    let dashed = NSBezierPath(ovalIn: circle)
+                    dashed.lineWidth = 1.2
+                    dashed.setLineDash([2.2, 2], count: 2, phase: 0)
+                    NSColor(Theme.textTertiary).setStroke()
+                    dashed.stroke()
+                }
+            }
         }
+        drawAvatars(row.item.assignees, rightEdge: right, midY: midY, ring: avatarRing, context: context)
         right -= 30 + 10
         date.draw(at: NSPoint(x: right - dateSize.width, y: midY - dateSize.height / 2))
+        dateRect = NSRect(x: right - dateSize.width, y: midY - 9, width: dateSize.width, height: 18)
         right -= 52 + 10
         if let project {
             let width = min(projectSize.width, 160)
@@ -618,10 +678,7 @@ final class IssueRowCell: NSView {
             let rect = NSRect(x: right - width, y: midY - 10, width: width, height: 20)
             guard rect.minX > x + 120 else { break }
             labelsRect = labelsRect.map { $0.union(rect) } ?? rect
-            NSColor(Theme.chipBorder).setStroke()
-            let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 9.5, yRadius: 9.5)
-            outline.lineWidth = 1
-            outline.stroke()
+            drawChip(rect, hovered: canEditFields && hoveredPart == .labels)
             label.color.setFill()
             NSBezierPath(ovalIn: NSRect(x: rect.minX + 7, y: midY - 3.5, width: 7, height: 7)).fill()
             label.text.draw(at: NSPoint(x: rect.minX + 19, y: midY - textSize.height / 2))
@@ -641,10 +698,7 @@ final class IssueRowCell: NSView {
         if let subCount, let subWidth {
             let rect = NSRect(x: x + titleWidth + 10, y: midY - 10, width: subWidth, height: 20)
             parts.append((.subIssues, rect))
-            NSColor(Theme.chipBorder).setStroke()
-            let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 9.5, yRadius: 9.5)
-            outline.lineWidth = 1
-            outline.stroke()
+            drawChip(rect, hovered: hoveredPart == .subIssues)
             let origin = NSPoint(x: rect.minX + 7, y: midY - 5.5)
             let glyph = NSBezierPath()
             glyph.move(to: NSPoint(x: origin.x + 2.3, y: origin.y + 1.8))
@@ -664,7 +718,38 @@ final class IssueRowCell: NSView {
             dot.stroke()
             subCount.draw(at: NSPoint(x: rect.minX + 7 + 11 + 4, y: midY - subCountSize.height / 2))
         }
+        // Tooltips follow the parts; rebuilt only when they moved.
+        if parts.map(\.rect) != self.parts.map(\.rect) || toolTipsNeedUpdate {
+            toolTipsNeedUpdate = false
+            removeAllToolTips()
+            for part in parts { addToolTip(part.rect.insetBy(dx: -3, dy: -4), owner: self, userData: nil) }
+            if dateRect.width > 0 { addToolTip(dateRect, owner: self, userData: nil) }
+        }
         self.parts = parts
+    }
+
+    private var toolTipsNeedUpdate = true
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        guard let row else { return "" }
+        if let part = part(at: point) { return model?.tooltip(part.kind, for: row.item) ?? "" }
+        if dateRect.insetBy(dx: -3, dy: -4).contains(point), let updated = row.item.updatedAt {
+            var text = "Updated " + updated.formatted(date: .long, time: .shortened)
+            if let created = row.item.createdAt { text += "\nCreated " + created.formatted(date: .long, time: .shortened) }
+            return text
+        }
+        return ""
+    }
+
+    private func drawChip(_ rect: NSRect, hovered: Bool) {
+        let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 9.5, yRadius: 9.5)
+        if hovered {
+            NSColor(Theme.chipHover).setFill()
+            outline.fill()
+        }
+        NSColor(hovered ? Theme.chipHoverBorder : Theme.chipBorder).setStroke()
+        outline.lineWidth = 1
+        outline.stroke()
     }
 
     private func drawPriority(_ level: PriorityLevel, x: CGFloat, midY: CGFloat) {
@@ -690,7 +775,7 @@ final class IssueRowCell: NSView {
         }
     }
 
-    private func drawAvatars(_ people: [Person], rightEdge: CGFloat, midY: CGFloat, context: CGContext) {
+    private func drawAvatars(_ people: [Person], rightEdge: CGFloat, midY: CGFloat, ring: NSColor, context: CGContext) {
         let shown = Array(people.prefix(3))
         let diameter: CGFloat = 18
         for (index, person) in shown.enumerated().reversed() {
@@ -698,7 +783,7 @@ final class IssueRowCell: NSView {
             let rect = NSRect(x: rightEdge - diameter - offset, y: midY - diameter / 2, width: diameter, height: diameter)
             // A ring in the row colour separates overlapping avatars.
             if shown.count > 1 {
-                NSColor(highlighted ? Theme.selected : Theme.panel).setFill()
+                ring.setFill()
                 NSBezierPath(ovalIn: rect.insetBy(dx: -1.5, dy: -1.5)).fill()
             }
             if let url = person.avatarUrl, let image = AvatarCache.shared.cached(url) {
@@ -745,14 +830,24 @@ final class IssueHeaderCell: NSView {
     /// to the table, which also lets you drag them to reorder sections.
     var handlesClicks = false
 
-    /// A click folds the section in or out, except on the + button.
+    /// A click folds the section in or out, except on the + button. With Option, every section follows.
     func click(at point: NSPoint) {
         guard let section, !addButton.frame.contains(point) else { return }
-        model?.toggleSection(section.id)
+        if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
+            model?.toggleAllSections(like: section.id)
+        } else {
+            model?.toggleSection(section.id)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
         if !handlesClicks { super.mouseDown(with: event) }
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        // Inside the table the table builds the menu; the pinned copy builds its own.
+        guard handlesClicks, let section, let model else { return super.menu(for: event) }
+        return IssueTable.Coordinator.sectionMenu(section, model: model)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -982,6 +1077,13 @@ struct ItemMenuBuilder {
             let copy = ClosureMenuItem("Copy Link") { [model, item] in model.copyLink(item) }
             copy.image = MenuIcons.symbol("link")
             menu.addItem(copy)
+            if item.number != nil {
+                let branch = ClosureMenuItem("Copy Branch Name") { [model, item] in model.copyBranchName(item) }
+                branch.image = MenuIcons.symbol("arrow.triangle.branch")
+                branch.keyEquivalent = "."
+                branch.keyEquivalentModifierMask = [.command, .shift]
+                menu.addItem(branch)
+            }
             let github = ClosureMenuItem("Open on GitHub") { [model, item] in model.openOnGitHub(item) }
             github.image = MenuIcons.symbol("arrow.up.right.square")
             menu.addItem(github)

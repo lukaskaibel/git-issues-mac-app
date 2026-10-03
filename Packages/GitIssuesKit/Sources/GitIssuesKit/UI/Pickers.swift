@@ -212,6 +212,16 @@ enum PickerKind: Equatable {
 
     var staysOpen: Bool { self == .assignees || self == .labels }
 
+    var help: String {
+        switch self {
+        case .status: "Change status"
+        case .priority: "Change priority"
+        case .assignees: "Assign"
+        case .labels: "Change labels"
+        case .subIssues: "Sub-issues"
+        }
+    }
+
     var width: CGFloat { self == .subIssues ? 460 : 280 }
 }
 
@@ -281,20 +291,56 @@ extension AppModel {
                 )
             }
         case .subIssues:
-            return subIssueItems(of: item).map { sub in
+            // Status, priority and assignee change in place, as in Linear; the rest of the row opens the issue.
+            let showsPriority = project(of: item)?.priorityFieldId != nil
+            let rows = subIssueItems(of: item).map { sub in
                 PickerItem(
                     id: sub.id, title: sub.title,
-                    icon: AnyView(StatusIcon(glyph: glyph(of: sub))),
+                    icon: AnyView(PartButton(kind: .status, itemId: sub.id) { StatusIcon(glyph: glyph(of: sub)) }),
                     prefix: sub.displayNumber,
                     trailing: AnyView(HStack(spacing: 10) {
-                        PriorityIcon(level: priorityLevel(of: sub))
-                        Group {
-                            if sub.assignees.isEmpty { Color.clear } else { AvatarStack(people: sub.assignees) }
+                        if showsPriority {
+                            PartButton(kind: .priority, itemId: sub.id) { PriorityIcon(level: priorityLevel(of: sub)) }
                         }
-                        .frame(width: 30, height: 18, alignment: .trailing)
+                        PartButton(kind: .assignees, itemId: sub.id) {
+                            Group {
+                                if sub.assignees.isEmpty {
+                                    Image(systemName: "person.crop.circle.dashed")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(Theme.textTertiary)
+                                } else {
+                                    AvatarStack(people: sub.assignees)
+                                }
+                            }
+                            .frame(minWidth: 18, minHeight: 18, alignment: .trailing)
+                        }
                     })
                 )
             }
+            guard item.kind == .issue else { return rows }
+            let add = PickerItem(
+                id: Self.newSubIssueId, title: "New sub-issue…",
+                icon: AnyView(Image(systemName: "plus").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.textSecondary))
+            )
+            return rows + [add]
+        }
+    }
+
+    static let newSubIssueId = "new-sub-issue"
+
+    /// What a part of a card or list row shows on hover, as Linear names each value.
+    func tooltip(_ kind: PickerKind, for item: Item) -> String {
+        switch kind {
+        case .status:
+            return "Status: \(statusOption(of: item)?.name ?? "None")"
+        case .priority:
+            return "Priority: \(priorityOption(of: item)?.name ?? "None")"
+        case .assignees:
+            return item.assignees.isEmpty ? "Unassigned" : "Assigned to " + item.assignees.map(\.login).formatted(.list(type: .and))
+        case .labels:
+            return "Labels: " + item.labels.map(\.name).joined(separator: ", ")
+        case .subIssues:
+            return "\(item.subCompleted) of \(item.subTotal) sub-issues done"
         }
     }
 
@@ -319,7 +365,11 @@ extension AppModel {
         case .labels:
             if let label = labels(for: current).first(where: { $0.id == id }) { toggleLabel(current, label) }
         case .subIssues:
-            if let sub = allItems.first(where: { $0.id == id }) { open(sub) }
+            if id == Self.newSubIssueId {
+                overlay = .newIssue(statusId: nil, parentItemId: current.id)
+            } else if let sub = allItems.first(where: { $0.id == id }) {
+                open(sub)
+            }
         }
     }
 
@@ -378,6 +428,37 @@ struct PropertyButton<Label: View>: View {
         .buttonStyle(PlainPressStyle())
         .dropdown(isPresented: $open) { close in
             ItemPicker(kind: kind, itemId: item.id, close: close)
+        }
+    }
+}
+
+/// A small part of a row, such as a status icon, that opens its picker for that issue in a dropdown.
+/// Inside another dropdown it opens on top of it, so the list underneath stays open.
+struct PartButton<Label: View>: View {
+    var kind: PickerKind
+    var itemId: String
+    @ViewBuilder var label: Label
+
+    @State private var open = false
+    @State private var hovering = false
+
+    var body: some View {
+        // Avatars get a round halo, icons a small square, as on cards and list rows.
+        let radius: CGFloat = kind == .assignees ? 12 : 5
+        Button {
+            open = true
+        } label: {
+            label
+                .padding(3)
+                .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(hovering || open ? Theme.partHover : .clear))
+                .contentShape(Rectangle())
+                .padding(-3)
+        }
+        .buttonStyle(PlainPressStyle())
+        .onHover { hovering = $0 }
+        .help(kind.help)
+        .dropdown(isPresented: $open) { close in
+            ItemPicker(kind: kind, itemId: itemId, close: close)
         }
     }
 }
