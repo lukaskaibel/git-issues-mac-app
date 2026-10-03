@@ -16,6 +16,20 @@ All notable changes to this project are recorded here. The format follows
 - The right-click menu has icons and submenus for status, priority, assignee and labels, with the same glyphs and
   number keys as the dropdowns. Cards, list rows and sub-issues share it.
 - List sections fold in and out with a click on their header, shown by an arrow on the left. Kept per project.
+- In the sub-issue dropdown, each sub-issue's status, priority and assignee open their own dropdown on top, as
+  in Linear; Escape or a click back closes just that one. The list ends with **New sub-issue…**.
+- Sub-issues in the issue view change status, priority and assignee from their row, like cards.
+- A sub-issue's header shows its parent between the project and its number; click it to go up.
+- Right-click a project in the sidebar to hide it, copy its link or open it on GitHub. Hidden projects fold away
+  under one line at the end of the list.
+- **Copy Branch Name** (⌘⇧.), in the right-click menu, the Issue menu and the issue header, copies the branch name
+  GitHub suggests, such as `14-sign-in-with-github-device-flow`. The header also has a copy-link button.
+- Tooltips name what you point at on cards and list rows (priority, status, assignees, labels, sub-issues), and
+  the list's date shows when the issue was updated and created.
+- Board column headers have a right-click menu and rename on a double-click. List section headers have a
+  right-click menu too, and Option-click folds or unfolds every section.
+- Closing the new-issue dialog keeps what you typed, as Linear does; the next new issue picks up from there, with
+  **Discard draft** to start over.
 - Every status header in the list stays pinned at the top while you scroll through its section, and the next
   header pushes it out of the way. The pinned header folds its section with a click too.
 - Descriptions are edited in place, as in Linear: click anywhere and type. Markdown is styled as you type
@@ -31,6 +45,9 @@ All notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- Parts of cards and list rows light up in a shape that suits them, as in Linear: a small square behind an icon,
+  a round halo around avatars (with a dashed placeholder where an unassigned issue's avatar would be), and chips
+  brighten in their own outline instead of getting a box behind them.
 - The app is called Issues now; "Git Issues" was a working title. Data, settings and sign-in carry over, and the
   built app is `Issues.app`.
 - New app icon: a card lifted off a board, in the accent colour. It's an Icon Composer icon, so it follows light and
@@ -42,6 +59,8 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- The issue view's back arrow and Escape return to the issue you came from, such as the parent of a sub-issue,
+  instead of closing everything. Moving through issues with J and K no longer piles up history.
 - In the list, the header of the section you've scrolled into stays at the top without a line under it, and no
   rows show above it; the next header pushes it up.
 - The command palette, its pickers and the new-issue dialog reliably take keyboard focus when they open, so you

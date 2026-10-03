@@ -133,22 +133,26 @@ Hover an issue or move to it with the arrow keys, then:
 | `S` `P` `A` `L` | Change status, priority, assignee, labels |
 | `I` | Assign to me, or unassign |
 | `↑` `↓` or `J` `K` | Move through issues; `←` `→` change column on the board |
-| `Return` | Open the issue; `Esc` goes back |
+| `Return` | Open the issue; `Esc` goes back, to the parent if you came from it |
 | `⌘[` `⌘]` | Back and forward (also mouse side buttons and two-finger swipe) |
 | `G` then `B` / `L` / `M` / `P` | Go to board, list, My Issues, or switch project |
 | `⌘1` `⌘2` `⌘3` | Board, list, My Issues |
 | `⌘↵` | Save a description, send a comment, create the issue |
 | `⌘⇧C` / `⌘⇧O` | Copy the issue's GitHub link / open it on GitHub |
+| `⌘⇧.` | Copy a branch name for the issue, as GitHub suggests it |
 | `⌘⌫` | Delete the issue (asks first; needs admin rights in the repository) |
 | `⌘R` | Sync with GitHub now |
 | `⌘,` | Settings: light, dark or system appearance, and the app icon |
 
 Click an issue's priority, status, labels, assignees or sub-issue count to change it in place, or right-click
-it for everything at once. In the list, click a section header to fold it.
+it for everything at once. The sub-issue count lists the sub-issues, whose status, priority and assignee change
+right there too. In the list, click a section header to fold it; Option-click folds them all.
 
 On the board, drag cards between and within columns; press `Esc` mid-drag to put a card back. Drag a column by its
-header to reorder it, hover the header for its menu (rename, colour, delete), and use **Add column** at the right
-end of the board.
+header to reorder it, double-click its name to rename it, right-click it for its menu (rename, colour, delete), and
+use **Add column** at the right end of the board.
+
+Right-click a project in the sidebar to hide it; hidden projects wait, folded away, at the end of the list.
 
 ## Not there yet
 

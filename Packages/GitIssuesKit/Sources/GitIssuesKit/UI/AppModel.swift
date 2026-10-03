@@ -117,6 +117,12 @@ public final class AppModel {
     var deletionCandidate: Item?
     /// Bumped when a list section is folded in or out, so the list redraws.
     var collapseVersion = 0
+    /// A new issue that was closed before it was created, kept for the next time the dialog opens.
+    @ObservationIgnored var unsentNewIssue: NewIssueDraft?
+    /// Projects tucked away in the sidebar. They can still be found in the command palette.
+    var hiddenProjectIds = Set(UserDefaults.standard.stringArray(forKey: "hiddenProjects") ?? []) {
+        didSet { UserDefaults.standard.set(Array(hiddenProjectIds), forKey: "hiddenProjects") }
+    }
     var overlay: Overlay? {
         didSet {
             if overlay != nil, overlay != oldValue { overlayOpenedAt = Date() }
@@ -494,7 +500,9 @@ public final class AppModel {
     private func restoreScope() {
         guard scope == nil, !projects.isEmpty else { return }
         let saved = UserDefaults.standard.string(forKey: "selectedProject")
-        let project = projects.first { $0.id == saved } ?? projects.first { !$0.closed } ?? projects.first
+        let project = projects.first { $0.id == saved }
+            ?? projects.first { !$0.closed && !hiddenProjectIds.contains($0.id) }
+            ?? projects.first { !$0.closed } ?? projects.first
         if let project { select(.project(project.id)) }
     }
 
@@ -512,10 +520,10 @@ public final class AppModel {
         recordNavigation()
     }
 
-    func open(_ item: Item) {
+    func open(_ item: Item, replacingHistory: Bool = false) {
         focusedItemId = item.id
         openItemId = item.id
-        recordNavigation()
+        recordNavigation(replacing: replacingHistory)
         observeDetail(contentId: item.contentId)
         let contentId = item.contentId
         let projectId = item.projectId
@@ -527,6 +535,19 @@ public final class AppModel {
             if fetchable, let contentId { try? await engine.loadIssueDetail(contentId: contentId) }
             if let repoId { try? await engine.loadRepoMeta(projectId: projectId, repoId: repoId) }
         }
+    }
+
+    /// Back from the open issue, with its back button or Escape: to the issue it was opened from, such as the
+    /// parent of a sub-issue, or else to the board or list.
+    func leaveIssue() {
+        if historyIndex > 0, history.indices.contains(historyIndex) {
+            let previous = history[historyIndex - 1]
+            if previous.scope == scope, let id = previous.itemId, id != openItemId, allItems.contains(where: { $0.id == id }) {
+                goBack()
+                return
+            }
+        }
+        closeDetail()
     }
 
     func closeDetail() {

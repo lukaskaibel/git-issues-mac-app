@@ -60,6 +60,11 @@ public struct GitIssuesScene: Scene {
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(model.targetItem?.url == nil)
+                Button("Copy Branch Name") {
+                    if let item = model.targetItem { model.copyBranchName(item) }
+                }
+                .keyboardShortcut(".", modifiers: [.command, .shift])
+                .disabled(model.targetItem?.number == nil)
                 Button("Open on GitHub") {
                     if let item = model.targetItem { model.openOnGitHub(item) }
                 }

@@ -64,7 +64,8 @@ extension AppModel {
             next = delta > 0 ? items[0] : items[items.count - 1]
         }
         if openItem != nil {
-            open(next)
+            // Stepping through issues doesn't pile up history: Back still leaves for the board or list.
+            open(next, replacingHistory: true)
         } else {
             moveFocus(to: next.id)
         }
@@ -173,7 +174,7 @@ extension AppModel {
 
         if isEscape {
             if openItem != nil {
-                closeDetail()
+                leaveIssue()
                 return true
             }
             return false

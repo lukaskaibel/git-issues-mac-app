@@ -21,6 +21,11 @@ enum Theme {
     static let control = Color(light: 0xE7E8EC, dark: 0x191B1F)
     static let controlActive = Color(light: 0xE4E5E9, dark: 0x2A2D33)
     static let chipBorder = Color(light: 0xDCDDE2, dark: 0x2A2D33)
+    /// A chip under the pointer lights up in its own shape rather than getting a box behind it.
+    static let chipHover = Color(light: 0xEFF0F3, dark: 0x22252A)
+    static let chipHoverBorder = Color(light: 0xC4C6CE, dark: 0x3A3E46)
+    /// Behind a small icon or avatar under the pointer.
+    static let partHover = Color(light: 0xE4E5E9, dark: 0x2A2D33)
 
     static let popover = Color(light: 0xFFFFFF, dark: 0x1B1D21)
     static let popoverBorder = Color(light: 0xDDDEE3, dark: 0x2C2F36)

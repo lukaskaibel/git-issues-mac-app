@@ -172,6 +172,8 @@ struct ColumnView: View {
                 .animation(Theme.spring, value: column.items.map(\.id))
                 // One hover and one click handler per column instead of one per card.
                 .contentShape(Rectangle())
+                // The part under the pointer names its value, as in Linear.
+                .help(Text(hoveredTooltip))
                 .onContinuousHover(coordinateSpace: .named(BoardDrag.space)) { phase in
                     switch phase {
                     case .active(let point):
@@ -210,6 +212,11 @@ struct ColumnView: View {
         }
         .onDisappear { drag.columnFrames[column.id] = nil }
         .onChange(of: drag.tick) { autoScroll() }
+    }
+
+    private var hoveredTooltip: String {
+        guard let hoveredPart, let item = column.items.first(where: { $0.id == hoveredId }) else { return "" }
+        return model.tooltip(hoveredPart, for: item)
     }
 
     private func card(at point: CGPoint) -> Item? {
@@ -307,32 +314,15 @@ struct ColumnHeader: View {
                     }
             } else {
                 Text(column.title).font(.uiSemibold).lineLimit(1)
+                    // Double-click the name to rename the column in place.
+                    .onTapGesture(count: 2) { if canEdit, column.option != nil { startRename() } }
                 Text("\(column.items.count)").foregroundStyle(Theme.textTertiary).monospacedDigit()
             }
             Spacer(minLength: 0)
 
             if canEdit, column.option != nil {
                 Menu {
-                    Button("Rename…") { startRename() }
-                    Menu("Colour") {
-                        ForEach(Defaults.optionColors, id: \.self) { color in
-                            Button {
-                                edit { $0.color = color }
-                            } label: {
-                                if column.option?.color == color {
-                                    Label(color.capitalized, systemImage: "checkmark")
-                                } else {
-                                    Text(color.capitalized)
-                                }
-                            }
-                        }
-                    }
-                    Divider()
-                    Button("Move Left") { move(-1) }.disabled(position == 0)
-                    Button("Move Right") { move(1) }.disabled(position == statuses.count - 1)
-                    Divider()
-                    Button("Delete Column…", role: .destructive) { confirmDelete = true }
-                        .disabled(statuses.count <= 1)
+                    columnMenu
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 12, weight: .medium))
@@ -356,6 +346,16 @@ struct ColumnHeader: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .animation(Theme.quick, value: hovering)
+        // The same options on a right-click, as anywhere else in the app.
+        .contextMenu {
+            if canEdit, column.option != nil {
+                columnMenu
+                Divider()
+            }
+            Button("New Issue in \(column.title)") {
+                model.overlay = .newIssue(statusId: column.option?.id, parentItemId: nil)
+            }
+        }
         .confirmationDialog(
             "Delete the \"\(column.title)\" column?",
             isPresented: $confirmDelete
@@ -416,6 +416,31 @@ struct ColumnHeader: View {
         guard options.indices.contains(position) else { return }
         options.remove(at: position)
         withAnimation(Theme.spring) { model.saveColumns(projectId: projectId, options) }
+    }
+}
+
+extension ColumnHeader {
+    @ViewBuilder var columnMenu: some View {
+        Button("Rename…") { startRename() }
+        Menu("Colour") {
+            ForEach(Defaults.optionColors, id: \.self) { color in
+                Button {
+                    edit { $0.color = color }
+                } label: {
+                    if column.option?.color == color {
+                        Label(color.capitalized, systemImage: "checkmark")
+                    } else {
+                        Text(color.capitalized)
+                    }
+                }
+            }
+        }
+        Divider()
+        Button("Move Left") { move(-1) }.disabled(position == 0)
+        Button("Move Right") { move(1) }.disabled(position == statuses.count - 1)
+        Divider()
+        Button("Delete Column…", role: .destructive) { confirmDelete = true }
+            .disabled(statuses.count <= 1)
     }
 }
 
