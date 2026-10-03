@@ -8,7 +8,7 @@
 <h1 align="center">Issues</h1>
 
 <p align="center">
-  A fast, native Mac app for GitHub Issues, with the board, keyboard flow and polish of Linear.<br>
+  <b>A fast, native Mac app for GitHub Issues</b>, with the board, keyboard flow and polish of Linear.<br>
   Everything stays in GitHub, so teammates who don't use the app notice nothing.
 </p>
 
@@ -20,7 +20,19 @@
   <a href="CHANGELOG.md"><img alt="Version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-5B63D3"></a>
 </p>
 
-![The board, dark appearance](Design/screenshots/board-dark.png)
+<p align="center">
+  <a href="#a-quick-tour"><b>Tour</b></a> &nbsp;·&nbsp;
+  <a href="#getting-started"><b>Getting started</b></a> &nbsp;·&nbsp;
+  <a href="#using-it"><b>Shortcuts</b></a> &nbsp;·&nbsp;
+  <a href="CHANGELOG.md"><b>Changelog</b></a>
+</p>
+
+<br>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Design/screenshots/hero-dark.webp">
+  <img alt="Issues showing a GitHub Project as a board, with Backlog, Todo, In Progress and In Review columns" src="Design/screenshots/hero-light.webp">
+</picture>
 
 > **Status: early.** Version 0.1.0 covers the daily work of moving, editing and creating issues.
 > There are no downloadable builds yet; you build it from source (five minutes, see below).
@@ -31,14 +43,57 @@ GitHub Issues holds the data most teams already have. Its interface is slow to d
 page load and a menu. This app puts a native, keyboard-first front end on the same data. It reads and writes
 GitHub Projects, issues, sub-issues, labels, assignees and comments, and stores nothing anywhere else.
 
-## What it does
+## A quick tour
 
-| | |
-|---|---|
-| ![Dragging a card](Design/screenshots/drag-dark.png) | ![An issue](Design/screenshots/issue-dark.png) |
-| **Board** with drag and drop: cards lift, tilt and settle with springs, and neighbours make room. | **Issues** with Markdown, sub-issues, comments and every property one click or one key away. |
-| ![Command palette](Design/screenshots/palette-dark.png) | ![List, light appearance](Design/screenshots/list-light.png) |
-| **Command palette** (⌘K) for every action and for jumping to any issue. | **List** grouped by status. Light, dark, or following the system. |
+### A board you can pick up
+
+Drag a card and it lifts off the board, tilts with the motion and settles with a spring, while its neighbours make
+room. Press Esc mid-drag and it goes back to where it came from. The move shows in the same frame and reaches
+GitHub in the background.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Design/screenshots/drag-dark.webp">
+  <img alt="A card is dragged from In Progress to In Review, the cards there make room, and Esc sends it back" src="Design/screenshots/drag-light.webp">
+</picture>
+
+Every property is one click away: click a card's priority, status, labels, assignees or sub-issue count and a
+dropdown opens right there. Type to filter, press a number to pick. Right-click a card for everything at once.
+
+### Issues that read well
+
+Descriptions are Markdown, edited in place: click and type. Sub-issues come with a progress bar, comments sit below,
+and status, priority, assignees and labels are in the sidebar. Step to the next issue with the arrows at the top.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Design/screenshots/issue-dark.webp">
+  <img alt="An issue with its description, five sub-issues of which four are done, a comment, and its properties" src="Design/screenshots/issue-light.webp">
+</picture>
+
+### Keyboard first
+
+⌘K opens the command palette: every action, and a search across your issues. Single keys act on the issue you
+hover or reach with the arrow keys: `S` status, `P` priority, `A` assignee, `L` labels, `I` assign to me.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Design/screenshots/palette-dark.webp">
+  <img alt="The command palette with actions for the selected issue and their single-key shortcuts" src="Design/screenshots/palette-light.webp">
+</picture>
+
+`C` starts a new issue wherever you are. Type the title, set its properties, and ⌘↵ creates it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Design/screenshots/new-issue-dark.webp">
+  <img alt="The new-issue dialog with a title typed in and buttons for status, priority, assignee and labels" src="Design/screenshots/new-issue-light.webp">
+</picture>
+
+### A list, in light or dark
+
+The list groups issues by status. Each header stays pinned while you scroll through its section and folds it with
+a click. The app follows the system appearance, or stays light or dark if you prefer.
+
+<img alt="The list grouped by status, half in the dark appearance and half in the light one" src="Design/screenshots/list-appearance.webp">
+
+## What it does
 
 - **Board and list** for every GitHub Project you can see, plus **My Issues** across all of them.
 - **Instant.** Every change is written to a local database first and shows in the same frame. GitHub is updated in
@@ -177,7 +232,7 @@ Packages/GitIssuesKit/
   Sources/gi-cli/            Command-line tool for exercising sync without the UI
   Tests/                     Unit tests
 Config/                      Build settings and Info.plist
-Design/                      The violet icon, earlier icon variants, screenshots
+Design/                      The violet icon, earlier icon variants, screenshots, social preview
 Tools/                       make-card-icon.swift draws the app icon; render-icons.sh renders its PNG copies
 ```
 
